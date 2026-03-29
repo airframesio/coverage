@@ -123,9 +123,20 @@ export class CoverageStore {
 
     this.eventsProcessed++;
 
-    // 5. Index into H3 cells (only if we have a valid target position)
-    if (hasValidTarget && event.targetLat !== null && event.targetLon !== null) {
-      const h3Cells = indexPoint(event.targetLat, event.targetLon);
+    // 5. Index into H3 cells
+    // If we have a target position, index at the target (aircraft/vessel) location.
+    // If not, index at the station location — receiving a message proves coverage there.
+    const indexLat = hasValidTarget && event.targetLat !== null ? event.targetLat : stationLat;
+    const indexLon = hasValidTarget && event.targetLon !== null ? event.targetLon : stationLon;
+
+    // Skip if we still have no usable coordinates
+    if (indexLat === 0 && indexLon === 0) {
+      this.updateStationCoverage(event, stationLat, stationLon, distance, brng, hasValidTarget);
+      return;
+    }
+
+    {
+      const h3Cells = indexPoint(indexLat, indexLon);
 
       for (let ri = 0; ri < H3_RESOLUTION_CONFIGS.length; ri++) {
         const resolution = H3_RESOLUTION_CONFIGS[ri].resolution;
