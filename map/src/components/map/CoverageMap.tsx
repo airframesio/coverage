@@ -86,17 +86,14 @@ export default function CoverageMap() {
   }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
 
   const fetchPolygons = useCallback(async () => {
-    // Fetch coverage polygons for all stations that have position data
-    const stationsWithCoverage = stations.filter(
+    const withPosition = stations.filter(
       (s) => s.latitude !== 0 && s.longitude !== 0 && s.messagesWithPosition > 0
-    );
+    ).slice(0, 30);
 
     const polygons: CoveragePolygon[] = [];
-    // Fetch top 20 stations to avoid too many requests
-    const toFetch = stationsWithCoverage.slice(0, 20);
 
     await Promise.allSettled(
-      toFetch.map(async (station) => {
+      withPosition.map(async (station) => {
         try {
           const res = await fetch(
             `${API_URL}/api/v1/coverage/stations/${station.id}?window=${timeWindow}`
@@ -108,7 +105,7 @@ export default function CoverageMap() {
                 stationId: station.id,
                 ident: data.ident,
                 coordinates: data.polygon.geometry.coordinates,
-                confidence: data.confidence,
+                confidence: data.confidence || 0.5,
                 messageCount: data.messageCount,
                 sourceType: data.sourceType,
               });
