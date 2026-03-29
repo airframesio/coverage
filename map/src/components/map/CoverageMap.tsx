@@ -12,10 +12,11 @@ import { createPolygonLayer } from './layers/polygon-layer';
 import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import StationPopup from '@/components/station/StationPopup';
+import type { CoveragePolygon } from '@/lib/types/coverage';
 
-const POLL_INTERVAL = 10_000;   // Refresh data every 10s
-const STATS_INTERVAL = 5_000;   // Refresh stats every 5s
-const ZOOM_DEBOUNCE = 800;      // Wait 800ms after zoom stops before re-fetching
+const POLL_INTERVAL = 10_000;
+const STATS_INTERVAL = 5_000;
+const ZOOM_DEBOUNCE = 800;
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
 
@@ -45,29 +46,27 @@ export default function CoverageMap() {
   const polygonData = useCoverageStore((s) => s.polygonData);
   const stations = useCoverageStore((s) => s.stations);
   const setHexData = useCoverageStore((s) => s.setHexData);
+  const setPolygonData = useCoverageStore((s) => s.setPolygonData);
   const setStations = useCoverageStore((s) => s.setStations);
   const setStats = useCoverageStore((s) => s.setStats);
   const setRefreshing = useCoverageStore((s) => s.setRefreshing);
 
-  // Track the current H3 resolution (debounced from zoom changes)
   const [h3Resolution, setH3Resolution] = useState(() => zoomToH3Resolution(viewState.zoom));
   const zoomDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Debounce zoom → H3 resolution changes
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
   }, []);
 
   const onMoveEnd = useCallback((evt: { viewState: typeof viewState }) => {
     setViewState(evt.viewState);
-    // Debounce the H3 resolution change to avoid rapid re-fetches during zoom
     clearTimeout(zoomDebounceRef.current);
     zoomDebounceRef.current = setTimeout(() => {
       setH3Resolution(zoomToH3Resolution(evt.viewState.zoom));
     }, ZOOM_DEBOUNCE);
   }, [setViewState]);
 
-  // ── Data fetching: silent background refresh, no flicker ──
+  // ── Data fetching ──
 
   const fetchCoverage = useCallback(async (silent: boolean) => {
     if (!silent) setRefreshing(true);
@@ -82,8 +81,44 @@ export default function CoverageMap() {
         const data = await res.json();
         setHexData(data.cells ?? []);
       }
-    } catch { /* silently retry on next interval */ }
+    } catch { /* retry next interval */ }
   }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
+
+  const fetchPolygons = useCallback(async () => {
+    // Fetch coverage polygons for all stations that have position data
+    const stationsWithCoverage = stations.filter(
+      (s) => s.latitude !== 0 && s.longitude !== 0 && s.messagesWithPosition > 0
+    );
+
+    const polygons: CoveragePolygon[] = [];
+    // Fetch top 20 stations to avoid too many requests
+    const toFetch = stationsWithCoverage.slice(0, 20);
+
+    await Promise.allSettled(
+      toFetch.map(async (station) => {
+        try {
+          const res = await fetch(
+            `${API_URL}/api/v1/coverage/stations/${station.id}?window=${timeWindow}`
+          );
+          if (res.ok) {
+            const data = await res.json();
+            if (data.polygon?.geometry?.coordinates) {
+              polygons.push({
+                stationId: station.id,
+                ident: data.ident,
+                coordinates: data.polygon.geometry.coordinates,
+                confidence: data.confidence,
+                messageCount: data.messageCount,
+                sourceType: data.sourceType,
+              });
+            }
+          }
+        } catch { /* skip */ }
+      })
+    );
+
+    setPolygonData(polygons);
+  }, [stations, timeWindow, setPolygonData]);
 
   const fetchStations = useCallback(async () => {
     try {
@@ -92,7 +127,7 @@ export default function CoverageMap() {
         const data = await res.json();
         setStations(data.stations ?? []);
       }
-    } catch { /* retry on next interval */ }
+    } catch { /* retry next interval */ }
   }, [timeWindow, setStations]);
 
   const fetchStats = useCallback(async () => {
@@ -108,16 +143,24 @@ export default function CoverageMap() {
     fetchStations();
   }, [fetchCoverage, fetchStations]);
 
-  // Periodic silent refresh for coverage + stations
+  // Fetch polygons when mode switches to polygon or stations update
+  useEffect(() => {
+    if (mode === 'polygon' && stations.length > 0) {
+      fetchPolygons();
+    }
+  }, [mode, stations, fetchPolygons]);
+
+  // Periodic silent refresh
   useEffect(() => {
     const interval = setInterval(() => {
       fetchCoverage(true);
       fetchStations();
+      if (mode === 'polygon') fetchPolygons();
     }, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [fetchCoverage, fetchStations]);
+  }, [fetchCoverage, fetchStations, fetchPolygons, mode]);
 
-  // Stats on a faster interval
+  // Stats on faster interval
   useEffect(() => {
     fetchStats();
     const interval = setInterval(fetchStats, STATS_INTERVAL);
