@@ -3,8 +3,8 @@ import type { GeoJSONFeature, StationCoverage } from '../types/coverage.js';
 
 /**
  * Build a GeoJSON polygon from bearing sector data.
- * If enough sectors have data, builds a directional shape.
- * If only 1-2 sectors, builds an ellipse stretched toward those sectors.
+ * The polygon tightly follows actual reception data — unknown directions
+ * fall off quickly toward the station rather than assuming wide coverage.
  */
 export function buildCoveragePolygon(
   stationLat: number,
@@ -16,7 +16,7 @@ export function buildCoveragePolygon(
   const maxDist = coverage.maxDistance;
   if (maxDist <= 0) return null;
 
-  // Count sectors with data
+  // Collect sectors with actual data
   const nonZeroSectors: Array<{ index: number; distance: number }> = [];
   for (let i = 0; i < 36; i++) {
     if (coverage.bearingSectors[i] > 0) {
@@ -24,51 +24,51 @@ export function buildCoveragePolygon(
     }
   }
 
-  let coordinates: number[][];
+  if (nonZeroSectors.length === 0) return null;
 
-  if (nonZeroSectors.length >= 3) {
-    // Enough data for a directional polygon
-    const rawDistances: number[] = [];
-    for (let i = 0; i < 36; i++) {
-      rawDistances.push(coverage.bearingSectors[i] > 0 ? coverage.bearingSectors[i] : 0);
-    }
-    const interpolated = interpolateGaps(rawDistances);
-    coordinates = [];
-    for (let i = 0; i < 36; i++) {
-      const brng = i * 10 + 5;
-      const dist = interpolated[i];
-      if (dist > 0) {
-        const [lat, lon] = destinationPoint(stationLat, stationLon, dist, brng);
-        coordinates.push([lon, lat]);
-      }
-    }
-  } else {
-    // Few sectors: build an ellipse stretched toward the known sectors
-    // Use maxDist as the radius toward known sectors, and a fraction for other directions
-    const minRadius = maxDist * 0.3; // minimum radius in unknown directions
-    coordinates = [];
-    for (let i = 0; i < 36; i++) {
-      const brng = i * 10 + 5;
-      let dist = minRadius;
+  // Build distance for each 10-degree sector
+  const distances = new Float64Array(36);
 
-      // Check if this sector (or a nearby sector) has data
+  // Minimum radius: just enough to be visible (5% of max distance, min 2km)
+  const minRadius = Math.max(2, maxDist * 0.05);
+
+  for (let i = 0; i < 36; i++) {
+    if (coverage.bearingSectors[i] > 0) {
+      // Sector has actual data — use it directly
+      distances[i] = coverage.bearingSectors[i];
+    } else {
+      // No data in this sector — use nearest neighbor with sharp falloff
+      let bestDist = minRadius;
       for (const s of nonZeroSectors) {
-        const sectorAngle = s.index * 10 + 5;
-        const diff = Math.abs(brng - sectorAngle);
-        const angularDist = Math.min(diff, 360 - diff);
-        // Smoothly blend toward known sector distances
-        if (angularDist < 90) {
-          const blend = 1 - angularDist / 90;
-          dist = Math.max(dist, minRadius + (s.distance - minRadius) * blend);
-        }
+        const angularDist = circularDistance(i, s.index, 36);
+        // Gaussian-like falloff: sharp drop within ~30 degrees, near-zero beyond ~50
+        // This keeps the polygon tight to actual data
+        const sigma = 3; // ~30 degrees (3 sectors)
+        const weight = Math.exp(-(angularDist * angularDist) / (2 * sigma * sigma));
+        const interpolated = minRadius + (s.distance - minRadius) * weight;
+        bestDist = Math.max(bestDist, interpolated);
       }
-
-      const [lat, lon] = destinationPoint(stationLat, stationLon, dist, brng);
-      coordinates.push([lon, lat]);
+      distances[i] = bestDist;
     }
   }
 
-  if (coordinates.length < 3) return null;
+  // Light smoothing pass: average each sector with its immediate neighbors
+  // This prevents jagged edges while keeping the overall shape tight
+  const smoothed = new Float64Array(36);
+  for (let i = 0; i < 36; i++) {
+    const prev = distances[(i - 1 + 36) % 36];
+    const curr = distances[i];
+    const next = distances[(i + 1) % 36];
+    smoothed[i] = curr * 0.6 + prev * 0.2 + next * 0.2;
+  }
+
+  // Generate polygon vertices
+  const coordinates: number[][] = [];
+  for (let i = 0; i < 36; i++) {
+    const brng = i * 10 + 5;
+    const [lat, lon] = destinationPoint(stationLat, stationLon, smoothed[i], brng);
+    coordinates.push([lon, lat]);
+  }
 
   // Close the polygon
   coordinates.push(coordinates[0]);
@@ -88,50 +88,8 @@ export function buildCoveragePolygon(
   };
 }
 
-/** Linearly interpolate zero-valued sectors from nearest non-zero neighbors */
-function interpolateGaps(distances: number[]): number[] {
-  const result = [...distances];
-  const n = result.length;
-
-  let firstNonZero = -1;
-  for (let i = 0; i < n; i++) {
-    if (result[i] > 0) { firstNonZero = i; break; }
-  }
-  if (firstNonZero === -1) return result;
-
-  let prevIdx = firstNonZero;
-  let i = (firstNonZero + 1) % n;
-  while (i !== firstNonZero) {
-    if (result[i] > 0) {
-      const gapStart = prevIdx;
-      const gapEnd = i;
-      const gapLen = (gapEnd - gapStart + n) % n;
-      if (gapLen > 1) {
-        const startVal = result[gapStart];
-        const endVal = result[gapEnd];
-        for (let j = 1; j < gapLen; j++) {
-          const idx = (gapStart + j) % n;
-          const t = j / gapLen;
-          result[idx] = startVal + (endVal - startVal) * t;
-        }
-      }
-      prevIdx = i;
-    }
-    i = (i + 1) % n;
-  }
-
-  if (prevIdx !== firstNonZero) {
-    const gapLen = (firstNonZero - prevIdx + n) % n;
-    if (gapLen > 1) {
-      const startVal = result[prevIdx];
-      const endVal = result[firstNonZero];
-      for (let j = 1; j < gapLen; j++) {
-        const idx = (prevIdx + j) % n;
-        const t = j / gapLen;
-        result[idx] = startVal + (endVal - startVal) * t;
-      }
-    }
-  }
-
-  return result;
+/** Shortest distance between two indices on a circular array */
+function circularDistance(a: number, b: number, size: number): number {
+  const d = Math.abs(a - b);
+  return Math.min(d, size - d);
 }
