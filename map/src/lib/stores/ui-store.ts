@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_TIME_WINDOW } from '../constants/time-windows';
 import type { TimeWindowKey } from '../constants/time-windows';
+import type { MapStyleId } from '../constants/map-styles';
 
 interface ViewState {
   longitude: number;
@@ -28,6 +29,7 @@ interface UIState {
   searchQuery: string;
   fullscreen: boolean;
   pitch3d: boolean;
+  mapStyleId: MapStyleId;
 
   setMode: (mode: UIState['mode']) => void;
   setTimeWindow: (tw: TimeWindowKey) => void;
@@ -40,6 +42,7 @@ interface UIState {
   setSearchQuery: (q: string) => void;
   toggleFullscreen: () => void;
   togglePitch3d: () => void;
+  setMapStyleId: (id: MapStyleId) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -61,6 +64,7 @@ export const useUIStore = create<UIState>()(
       searchQuery: '',
       fullscreen: false,
       pitch3d: false,
+      mapStyleId: 'dark-matter' as MapStyleId,
 
       setMode: (mode) => set({ mode }),
       setTimeWindow: (timeWindow) => set({ timeWindow }),
@@ -73,6 +77,7 @@ export const useUIStore = create<UIState>()(
       setSearchQuery: (searchQuery) => set({ searchQuery }),
       toggleFullscreen: () => set((s) => ({ fullscreen: !s.fullscreen })),
       togglePitch3d: () => set((s) => ({ pitch3d: !s.pitch3d })),
+      setMapStyleId: (mapStyleId) => set({ mapStyleId }),
     }),
     {
       name: 'airframes-coverage-ui',
@@ -80,6 +85,7 @@ export const useUIStore = create<UIState>()(
         mode: state.mode,
         timeWindow: state.timeWindow,
         transportFilter: state.transportFilter,
+        mapStyleId: state.mapStyleId,
       }),
     }
   )

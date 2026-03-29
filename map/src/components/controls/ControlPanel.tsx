@@ -9,6 +9,7 @@ import ModeToggle from './ModeToggle';
 import TimeSlider from './TimeSlider';
 import CoverageLegend from './CoverageLegend';
 import SourceLegend from './SourceLegend';
+import MapStyleSwitcher from './MapStyleSwitcher';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
 import TopStations from './TopStations';
@@ -18,6 +19,8 @@ export default function ControlPanel() {
   const setPanelCollapsed = useUIStore((s) => s.setPanelCollapsed);
   const refreshing = useCoverageStore((s) => s.refreshing);
   const initialLoading = useCoverageStore((s) => s.initialLoading);
+  const hexData = useCoverageStore((s) => s.hexData);
+  const stations = useCoverageStore((s) => s.stations);
   const setMode = useUIStore((s) => s.setMode);
   const mode = useUIStore((s) => s.mode);
   const timeWindow = useUIStore((s) => s.timeWindow);
@@ -27,6 +30,30 @@ export default function ControlPanel() {
   const toggleFullscreen = useUIStore((s) => s.toggleFullscreen);
   const pitch3d = useUIStore((s) => s.pitch3d);
   const togglePitch3d = useUIStore((s) => s.togglePitch3d);
+
+  const exportGeoJSON = () => {
+    const features = [
+      // Stations as points
+      ...stations
+        .filter((s) => s.latitude !== 0 || s.longitude !== 0)
+        .map((s) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [s.longitude, s.latitude] },
+          properties: {
+            type: 'station', ident: s.ident, sourceType: s.sourceType,
+            messageCount: s.messageCount, maxDistance: s.maxDistance,
+          },
+        })),
+    ];
+    const geojson = { type: 'FeatureCollection', features };
+    const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `airframes-coverage-${timeWindow}.geojson`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -119,6 +146,18 @@ export default function ControlPanel() {
             onClick={toggleFullscreen}
             title="Fullscreen (F)"
           />
+          <ToolbarButton
+            label="⬇"
+            active={false}
+            onClick={exportGeoJSON}
+            title="Export coverage as GeoJSON"
+          />
+          <ToolbarButton
+            label="?"
+            active={false}
+            onClick={() => { /* handled by KeyboardHelp listener */ }}
+            title="Keyboard shortcuts (?)"
+          />
         </div>
       </div>
 
@@ -160,6 +199,7 @@ export default function ControlPanel() {
               <TimeSlider />
               <CoverageLegend />
               <SourceLegend />
+              <MapStyleSwitcher />
             </>
           )}
         </div>

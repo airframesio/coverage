@@ -5,6 +5,7 @@ import { Map, NavigationControl, useControl, type MapRef } from 'react-map-gl/ma
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_CONFIG, zoomToH3Resolution } from '@/lib/constants/map-config';
+import { MAP_STYLES } from '@/lib/constants/map-styles';
 import { useUIStore } from '@/lib/stores/ui-store';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
 import { createHexGridLayer } from './layers/hex-grid-layer';
@@ -13,6 +14,7 @@ import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import ConnectionBanner from '@/components/controls/ConnectionBanner';
 import ActivityTicker from '@/components/controls/ActivityTicker';
+import KeyboardHelp from '@/components/controls/KeyboardHelp';
 import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
@@ -52,6 +54,9 @@ export default function CoverageMap() {
   const clearFlyTo = useUIStore((s) => s.clearFlyTo);
   const pitch3d = useUIStore((s) => s.pitch3d);
   const fullscreen = useUIStore((s) => s.fullscreen);
+  const mapStyleId = useUIStore((s) => s.mapStyleId);
+
+  const mapStyleUrl = MAP_STYLES.find((s) => s.id === mapStyleId)?.url ?? MAP_STYLES[0].url;
 
   const hexData = useCoverageStore((s) => s.hexData);
   const polygonData = useCoverageStore((s) => s.polygonData);
@@ -293,7 +298,7 @@ export default function CoverageMap() {
         {...viewState}
         onMove={onMove}
         onMoveEnd={onMoveEnd}
-        mapStyle={MAP_CONFIG.style}
+        mapStyle={mapStyleUrl}
         style={{ width: '100%', height: '100%' }}
         attributionControl={false}
         minZoom={MAP_CONFIG.minZoom}
@@ -331,6 +336,8 @@ export default function CoverageMap() {
           onClose={() => setSelectedPolygon(null)}
         />
       )}
+
+      <KeyboardHelp />
     </div>
   );
 }
