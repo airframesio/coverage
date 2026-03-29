@@ -13,6 +13,7 @@ import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
+import PolygonPopup from '@/components/map/PolygonPopup';
 import type { CoverageHex, CoveragePolygon } from '@/lib/types/coverage';
 
 const POLL_INTERVAL = 10_000;
@@ -192,17 +193,25 @@ export default function CoverageMap() {
   }, []);
 
   const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
+  const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
 
   const onClick = useCallback((info: any) => {
     if (info.layer?.id === 'station-markers' && info.object) {
       selectStation(info.object.id);
       setSelectedHex(null);
+      setSelectedPolygon(null);
     } else if (info.layer?.id === 'coverage-hexgrid' && info.object) {
       setSelectedHex(info.object as CoverageHex);
+      setSelectedPolygon(null);
+      selectStation(null);
+    } else if (info.layer?.id === 'coverage-polygons' && info.object) {
+      setSelectedPolygon(info.object as CoveragePolygon);
+      setSelectedHex(null);
       selectStation(null);
     } else {
       selectStation(null);
       setSelectedHex(null);
+      setSelectedPolygon(null);
     }
   }, [selectStation]);
 
@@ -241,6 +250,13 @@ export default function CoverageMap() {
         <HexPopup
           hex={selectedHex}
           onClose={() => setSelectedHex(null)}
+        />
+      )}
+
+      {selectedPolygon && !selectedStation && !selectedHex && (
+        <PolygonPopup
+          polygon={selectedPolygon}
+          onClose={() => setSelectedPolygon(null)}
         />
       )}
     </div>
