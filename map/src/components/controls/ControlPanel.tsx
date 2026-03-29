@@ -1,11 +1,14 @@
 'use client';
 
+import { useEffect } from 'react';
 import Image from 'next/image';
 import { useUIStore } from '@/lib/stores/ui-store';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
+import { TIME_WINDOWS, type TimeWindowKey } from '@/lib/constants/time-windows';
 import ModeToggle from './ModeToggle';
 import TimeSlider from './TimeSlider';
 import CoverageLegend from './CoverageLegend';
+import SourceLegend from './SourceLegend';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
 import TopStations from './TopStations';
@@ -15,6 +18,37 @@ export default function ControlPanel() {
   const setPanelCollapsed = useUIStore((s) => s.setPanelCollapsed);
   const refreshing = useCoverageStore((s) => s.refreshing);
   const initialLoading = useCoverageStore((s) => s.initialLoading);
+  const setMode = useUIStore((s) => s.setMode);
+  const mode = useUIStore((s) => s.mode);
+  const timeWindow = useUIStore((s) => s.timeWindow);
+  const setTimeWindow = useUIStore((s) => s.setTimeWindow);
+  const selectStation = useUIStore((s) => s.selectStation);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Don't trigger when typing in search
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+
+      switch (e.key) {
+        case 'h': setMode('hexgrid'); break;
+        case 'p': setMode('polygon'); break;
+        case 'Escape': selectStation(null); break;
+        case '[': case ',': {
+          const idx = TIME_WINDOWS.findIndex((w) => w.key === timeWindow);
+          if (idx > 0) setTimeWindow(TIME_WINDOWS[idx - 1].key as TimeWindowKey);
+          break;
+        }
+        case ']': case '.': {
+          const idx = TIME_WINDOWS.findIndex((w) => w.key === timeWindow);
+          if (idx < TIME_WINDOWS.length - 1) setTimeWindow(TIME_WINDOWS[idx + 1].key as TimeWindowKey);
+          break;
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [setMode, timeWindow, setTimeWindow, selectStation]);
 
   return (
     <>
@@ -73,6 +107,7 @@ export default function ControlPanel() {
               <TransportFilter />
               <TimeSlider />
               <CoverageLegend />
+              <SourceLegend />
             </>
           )}
         </div>

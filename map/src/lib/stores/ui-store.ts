@@ -11,6 +11,12 @@ interface ViewState {
   bearing: number;
 }
 
+interface FlyToTarget {
+  longitude: number;
+  latitude: number;
+  zoom: number;
+}
+
 interface UIState {
   mode: 'hexgrid' | 'polygon';
   timeWindow: TimeWindowKey;
@@ -18,6 +24,8 @@ interface UIState {
   selectedStationId: number | null;
   panelCollapsed: boolean;
   viewState: ViewState;
+  flyToTarget: FlyToTarget | null;
+  searchQuery: string;
 
   setMode: (mode: UIState['mode']) => void;
   setTimeWindow: (tw: TimeWindowKey) => void;
@@ -25,6 +33,9 @@ interface UIState {
   selectStation: (id: number | null) => void;
   setPanelCollapsed: (collapsed: boolean) => void;
   setViewState: (vs: ViewState) => void;
+  flyTo: (target: FlyToTarget) => void;
+  clearFlyTo: () => void;
+  setSearchQuery: (q: string) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -42,6 +53,8 @@ export const useUIStore = create<UIState>()(
         pitch: 0,
         bearing: 0,
       },
+      flyToTarget: null,
+      searchQuery: '',
 
       setMode: (mode) => set({ mode }),
       setTimeWindow: (timeWindow) => set({ timeWindow }),
@@ -49,6 +62,9 @@ export const useUIStore = create<UIState>()(
       selectStation: (selectedStationId) => set({ selectedStationId }),
       setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
       setViewState: (viewState) => set({ viewState }),
+      flyTo: (flyToTarget) => set({ flyToTarget }),
+      clearFlyTo: () => set({ flyToTarget: null }),
+      setSearchQuery: (searchQuery) => set({ searchQuery }),
     }),
     {
       name: 'airframes-coverage-ui',

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Map, NavigationControl, useControl } from 'react-map-gl/maplibre';
+import { Map, NavigationControl, useControl, type MapRef } from 'react-map-gl/maplibre';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_CONFIG, zoomToH3Resolution } from '@/lib/constants/map-config';
@@ -43,6 +43,8 @@ export default function CoverageMap() {
   const setViewState = useUIStore((s) => s.setViewState);
   const selectedStationId = useUIStore((s) => s.selectedStationId);
   const selectStation = useUIStore((s) => s.selectStation);
+  const flyToTarget = useUIStore((s) => s.flyToTarget);
+  const clearFlyTo = useUIStore((s) => s.clearFlyTo);
 
   const hexData = useCoverageStore((s) => s.hexData);
   const polygonData = useCoverageStore((s) => s.polygonData);
@@ -57,6 +59,19 @@ export default function CoverageMap() {
   const zoomDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
   const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
+  const mapRef = useRef<MapRef>(null);
+
+  // Handle flyTo requests from UI (e.g. clicking station in top stations list)
+  useEffect(() => {
+    if (flyToTarget && mapRef.current) {
+      mapRef.current.flyTo({
+        center: [flyToTarget.longitude, flyToTarget.latitude],
+        zoom: flyToTarget.zoom,
+        duration: 1500,
+      });
+      clearFlyTo();
+    }
+  }, [flyToTarget, clearFlyTo]);
 
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
@@ -223,6 +238,7 @@ export default function CoverageMap() {
   return (
     <div className="h-screen w-screen relative">
       <Map
+        ref={mapRef}
         {...viewState}
         onMove={onMove}
         onMoveEnd={onMoveEnd}
