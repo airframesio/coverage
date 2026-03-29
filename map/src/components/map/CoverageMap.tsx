@@ -12,6 +12,7 @@ import { createPolygonLayer } from './layers/polygon-layer';
 import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import ConnectionBanner from '@/components/controls/ConnectionBanner';
+import ActivityTicker from '@/components/controls/ActivityTicker';
 import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
@@ -49,6 +50,8 @@ export default function CoverageMap() {
   const selectStation = useUIStore((s) => s.selectStation);
   const flyToTarget = useUIStore((s) => s.flyToTarget);
   const clearFlyTo = useUIStore((s) => s.clearFlyTo);
+  const pitch3d = useUIStore((s) => s.pitch3d);
+  const fullscreen = useUIStore((s) => s.fullscreen);
 
   const hexData = useCoverageStore((s) => s.hexData);
   const polygonData = useCoverageStore((s) => s.polygonData);
@@ -76,6 +79,16 @@ export default function CoverageMap() {
       clearFlyTo();
     }
   }, [flyToTarget, clearFlyTo]);
+
+  // Handle 3D pitch toggle
+  useEffect(() => {
+    if (mapRef.current) {
+      mapRef.current.easeTo({
+        pitch: pitch3d ? 50 : 0,
+        duration: 800,
+      });
+    }
+  }, [pitch3d]);
 
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
@@ -296,6 +309,7 @@ export default function CoverageMap() {
 
       <ControlPanel />
       <ConnectionBanner />
+      {!fullscreen && <ActivityTicker />}
 
       {selectedStation && (
         <StationPopup

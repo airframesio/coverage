@@ -26,6 +26,8 @@ interface UIState {
   viewState: ViewState;
   flyToTarget: FlyToTarget | null;
   searchQuery: string;
+  fullscreen: boolean;
+  pitch3d: boolean;
 
   setMode: (mode: UIState['mode']) => void;
   setTimeWindow: (tw: TimeWindowKey) => void;
@@ -36,6 +38,8 @@ interface UIState {
   flyTo: (target: FlyToTarget) => void;
   clearFlyTo: () => void;
   setSearchQuery: (q: string) => void;
+  toggleFullscreen: () => void;
+  togglePitch3d: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -55,6 +59,8 @@ export const useUIStore = create<UIState>()(
       },
       flyToTarget: null,
       searchQuery: '',
+      fullscreen: false,
+      pitch3d: false,
 
       setMode: (mode) => set({ mode }),
       setTimeWindow: (timeWindow) => set({ timeWindow }),
@@ -65,6 +71,8 @@ export const useUIStore = create<UIState>()(
       flyTo: (flyToTarget) => set({ flyToTarget }),
       clearFlyTo: () => set({ flyToTarget: null }),
       setSearchQuery: (searchQuery) => set({ searchQuery }),
+      toggleFullscreen: () => set((s) => ({ fullscreen: !s.fullscreen })),
+      togglePitch3d: () => set((s) => ({ pitch3d: !s.pitch3d })),
     }),
     {
       name: 'airframes-coverage-ui',
