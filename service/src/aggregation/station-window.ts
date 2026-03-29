@@ -1,26 +1,20 @@
 import type { WindowConfig, StationCoverage } from '../types/coverage.js';
+import type { TransportType } from '../types/events.js';
 
-/** Per-station sector data stored in one time slice */
+/** Per-station+transport sector data stored in one time slice */
 interface StationSliceData {
-  /** Max distance per 10-degree sector (36 sectors) */
   sectorMaxDist: Float64Array;
-  /** Message count per sector */
   sectorMsgCount: Uint32Array;
-  /** Sum of signal levels per sector (for averaging) */
   sectorLevelSum: Float64Array;
-  /** Total messages (with and without position) */
   totalMessages: number;
-  /** Messages that had target position */
   messagesWithPosition: number;
-  /** Sum of signal levels for overall average */
   totalLevelSum: number;
-  /** Count of messages with signal level data */
   levelCount: number;
-  /** Count of messages with errors */
   errorCount: number;
+  transportType: TransportType;
 }
 
-function createEmptySliceData(): StationSliceData {
+function createEmptySliceData(transportType: TransportType): StationSliceData {
   return {
     sectorMaxDist: new Float64Array(36),
     sectorMsgCount: new Uint32Array(36),
@@ -30,15 +24,21 @@ function createEmptySliceData(): StationSliceData {
     totalLevelSum: 0,
     levelCount: 0,
     errorCount: 0,
+    transportType,
   };
 }
 
-type Slice = Map<number, StationSliceData>; // stationId -> data
+/** Composite key: stationId + transportType */
+function sliceKey(stationId: number, transportType: TransportType): string {
+  return `${stationId}:${transportType}`;
+}
+
+type Slice = Map<string, StationSliceData>;
 
 /**
  * Sliding window for per-station bearing sector data.
- * Each slice stores sector data for all stations active in that period.
- * Aggregation across slices computes the window-scoped StationCoverage.
+ * Data is keyed by stationId+transportType so coverage can be
+ * filtered by transport type at query time.
  */
 export class StationSlidingWindow {
   readonly config: WindowConfig;
@@ -61,7 +61,7 @@ export class StationSlidingWindow {
     this.slices[this.currentIndex].clear();
   }
 
-  /** Record a reception event for a station in the current slice */
+  /** Record a reception event */
   record(
     stationId: number,
     sector: number,
@@ -69,12 +69,14 @@ export class StationSlidingWindow {
     signalLevel: number | null,
     hasPosition: boolean,
     hasError: boolean,
+    transportType: TransportType = 'aircraft',
   ): void {
+    const key = sliceKey(stationId, transportType);
     const slice = this.slices[this.currentIndex];
-    let data = slice.get(stationId);
+    let data = slice.get(key);
     if (!data) {
-      data = createEmptySliceData();
-      slice.set(stationId, data);
+      data = createEmptySliceData(transportType);
+      slice.set(key, data);
     }
 
     data.totalMessages++;
@@ -100,8 +102,11 @@ export class StationSlidingWindow {
     }
   }
 
-  /** Aggregate all slices into per-station coverage for the full window */
-  getStationCoverage(stationId: number): StationCoverage | null {
+  /**
+   * Aggregate all slices into per-station coverage.
+   * @param transportFilter - if set, only include data from matching transport types
+   */
+  getStationCoverage(stationId: number, transportFilter?: TransportType): StationCoverage | null {
     const result: StationCoverage = {
       stationId,
       bearingSectors: new Float64Array(36),
@@ -122,32 +127,32 @@ export class StationSlidingWindow {
     const sectorLevelSums = new Float64Array(36);
 
     for (const slice of this.slices) {
-      const data = slice.get(stationId);
-      if (!data) continue;
+      // Check all matching keys for this station
+      for (const [key, data] of slice) {
+        if (!key.startsWith(`${stationId}:`)) continue;
+        if (transportFilter && data.transportType !== transportFilter) continue;
 
-      result.totalMessages += data.totalMessages;
-      result.messagesWithPosition += data.messagesWithPosition;
-      totalLevelSum += data.totalLevelSum;
-      levelCount += data.levelCount;
-      errorCount += data.errorCount;
+        result.totalMessages += data.totalMessages;
+        result.messagesWithPosition += data.messagesWithPosition;
+        totalLevelSum += data.totalLevelSum;
+        levelCount += data.levelCount;
+        errorCount += data.errorCount;
 
-      for (let i = 0; i < 36; i++) {
-        // Max distance across all slices per sector
-        if (data.sectorMaxDist[i] > result.bearingSectors[i]) {
-          result.bearingSectors[i] = data.sectorMaxDist[i];
-        }
-        result.sectorMessageCounts[i] += data.sectorMsgCount[i];
-        sectorLevelSums[i] += data.sectorLevelSum[i];
-
-        if (data.sectorMaxDist[i] > result.maxDistance) {
-          result.maxDistance = data.sectorMaxDist[i];
+        for (let i = 0; i < 36; i++) {
+          if (data.sectorMaxDist[i] > result.bearingSectors[i]) {
+            result.bearingSectors[i] = data.sectorMaxDist[i];
+          }
+          result.sectorMessageCounts[i] += data.sectorMsgCount[i];
+          sectorLevelSums[i] += data.sectorLevelSum[i];
+          if (data.sectorMaxDist[i] > result.maxDistance) {
+            result.maxDistance = data.sectorMaxDist[i];
+          }
         }
       }
     }
 
     if (result.totalMessages === 0) return null;
 
-    // Compute averages
     result.avgLevel = levelCount > 0 ? totalLevelSum / levelCount : 0;
     result.errorRate = result.totalMessages > 0 ? errorCount / result.totalMessages : 0;
 
@@ -161,12 +166,14 @@ export class StationSlidingWindow {
     return result;
   }
 
-  /** Get all station IDs that have data in this window */
-  activeStationIds(): Set<number> {
+  /** Get all unique station IDs, optionally filtered by transport type */
+  activeStationIds(transportFilter?: TransportType): Set<number> {
     const ids = new Set<number>();
     for (const slice of this.slices) {
-      for (const id of slice.keys()) {
-        ids.add(id);
+      for (const [key, data] of slice) {
+        if (transportFilter && data.transportType !== transportFilter) continue;
+        const stationId = parseInt(key.split(':')[0], 10);
+        ids.add(stationId);
       }
     }
     return ids;

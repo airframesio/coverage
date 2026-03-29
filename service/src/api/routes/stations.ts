@@ -1,19 +1,24 @@
 import { Hono } from 'hono';
 import type { AppContext } from '../server.js';
+import type { TransportType } from '../../types/events.js';
 
 export const stationRoutes = new Hono<AppContext>();
+
+const MARINE_SOURCE_TYPES = new Set(['aiscatcher', 'ais']);
 
 /** GET /api/v1/stations — All stations with window-scoped coverage summaries */
 stationRoutes.get('/', (c) => {
   const store = c.get('store');
   const windowName = c.req.query('window') ?? '1h';
   const activeOnly = c.req.query('active') !== 'false';
+  const transportRaw = c.req.query('transport');
+  const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
+  const transportFilter = transportRaw && validTransports.includes(transportRaw)
+    ? transportRaw as TransportType
+    : undefined;
 
-  // Get window-scoped message counts from H3 sliding windows (properly expires old data)
   const windowCounts = store.getStationMessageCounts(windowName);
-
-  // Get full coverage data (for bearing sectors, signal levels, etc.)
-  const allCoverage = store.getAllStationCoverage(windowName);
+  const allCoverage = store.getAllStationCoverage(windowName, transportFilter);
   const coverageByStation = new Map(allCoverage.map((cov) => [cov.stationId, cov]));
 
   const stations = [];
@@ -23,6 +28,10 @@ stationRoutes.get('/', (c) => {
 
     const meta = store.stationMap.get(stationId);
     if (!meta) continue;
+
+    // Filter stations by transport type based on their source type
+    if (transportFilter === 'aircraft' && MARINE_SOURCE_TYPES.has(meta.sourceType)) continue;
+    if (transportFilter === 'marine' && !MARINE_SOURCE_TYPES.has(meta.sourceType)) continue;
 
     const cov = coverageByStation.get(stationId);
 

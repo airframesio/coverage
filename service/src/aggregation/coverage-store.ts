@@ -198,6 +198,7 @@ export class CoverageStore {
         event.signalLevel,
         hasValidTarget,
         hasError,
+        event.transportType,
       );
     }
   }
@@ -254,20 +255,20 @@ export class CoverageStore {
   }
 
   /** Get station coverage data for a specific station and window (sliding window scoped) */
-  getStationCoverage(stationId: number, windowName: string): StationCoverage | null {
+  getStationCoverage(stationId: number, windowName: string, transportFilter?: TransportType): StationCoverage | null {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1) return null;
-    return this.stationWindows[wi].getStationCoverage(stationId);
+    return this.stationWindows[wi].getStationCoverage(stationId, transportFilter);
   }
 
   /** Get all stations with coverage data for a given window */
-  getAllStationCoverage(windowName: string): StationCoverage[] {
+  getAllStationCoverage(windowName: string, transportFilter?: TransportType): StationCoverage[] {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1) return [];
     const sw = this.stationWindows[wi];
     const results: StationCoverage[] = [];
-    for (const id of sw.activeStationIds()) {
-      const cov = sw.getStationCoverage(id);
+    for (const id of sw.activeStationIds(transportFilter)) {
+      const cov = sw.getStationCoverage(id, transportFilter);
       if (cov && cov.totalMessages > 0) results.push(cov);
     }
     return results;
@@ -398,20 +399,24 @@ export class CoverageStore {
     const sw = this.stationWindows[wi];
     for (const s of stationData) {
       if (!s.stationId || !s.bearingSectors) continue;
+      // Determine transport type from station metadata
+      const meta = this.stationMap.get(s.stationId);
+      const tt: TransportType = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais')
+        ? 'marine' : 'aircraft';
       // Record each sector's data into the current slice
       for (let i = 0; i < 36; i++) {
         const dist = s.bearingSectors[i] ?? 0;
         const count = s.sectorMessageCounts?.[i] ?? 0;
         if (dist > 0 || count > 0) {
           for (let j = 0; j < count; j++) {
-            sw.record(s.stationId, i, dist, s.sectorAvgLevels?.[i] ?? null, true, false);
+            sw.record(s.stationId, i, dist, s.sectorAvgLevels?.[i] ?? null, true, false, tt);
           }
         }
       }
       // Record messages without position
       const noPos = (s.totalMessages ?? 0) - (s.messagesWithPosition ?? 0);
       for (let j = 0; j < noPos; j++) {
-        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, false, false);
+        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, false, false, tt);
       }
     }
   }

@@ -45,6 +45,11 @@ coverageRoutes.get('/stations/:id', (c) => {
   const store = c.get('store');
   const stationId = parseInt(c.req.param('id'), 10);
   const windowName = c.req.query('window') ?? '1h';
+  const transportRaw = c.req.query('transport');
+  const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
+  const transportFilter = transportRaw && validTransports.includes(transportRaw)
+    ? transportRaw as TransportType
+    : undefined;
 
   if (!Number.isInteger(stationId) || stationId < 1) {
     return c.json({ error: 'Invalid station ID' }, 400);
@@ -55,7 +60,7 @@ coverageRoutes.get('/stations/:id', (c) => {
     return c.json({ error: 'Station not found' }, 404);
   }
 
-  // Window-scoped message counts from H3 sliding windows (properly expires)
+  // Window-scoped message counts from H3 sliding windows
   const windowCounts = store.getStationMessageCounts(windowName);
   const windowData = windowCounts.get(stationId);
 
@@ -63,8 +68,8 @@ coverageRoutes.get('/stations/:id', (c) => {
     return c.json({ error: 'No coverage data for this station in this window' }, 404);
   }
 
-  // Bearing sector data (cumulative best-observed range per direction)
-  const coverage = store.getStationCoverage(stationId, windowName);
+  // Bearing sector data filtered by transport type
+  const coverage = store.getStationCoverage(stationId, windowName, transportFilter);
 
   const polygon = coverage
     ? buildCoveragePolygon(station.latitude, station.longitude, coverage)

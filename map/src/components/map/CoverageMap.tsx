@@ -124,8 +124,10 @@ export default function CoverageMap() {
     await Promise.allSettled(
       withPosition.map(async (station) => {
         try {
+          const p = new URLSearchParams({ window: timeWindow });
+          if (transportFilter !== 'all') p.set('transport', transportFilter);
           const res = await fetch(
-            `${API_URL}/api/v1/coverage/stations/${station.id}?window=${timeWindow}`
+            `${API_URL}/api/v1/coverage/stations/${station.id}?${p}`
           );
           if (res.ok) {
             const data = await res.json();
@@ -149,13 +151,15 @@ export default function CoverageMap() {
 
   const fetchStations = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/v1/stations?window=${timeWindow}`);
+      const params = new URLSearchParams({ window: timeWindow });
+      if (transportFilter !== 'all') params.set('transport', transportFilter);
+      const res = await fetch(`${API_URL}/api/v1/stations?${params}`);
       if (res.ok) {
         const data = await res.json();
         setStations(data.stations ?? []);
       }
     } catch { /* retry next interval */ }
-  }, [timeWindow, setStations]);
+  }, [timeWindow, transportFilter, setStations]);
 
   const fetchStats = useCallback(async () => {
     try {
