@@ -11,6 +11,7 @@ import { createHexGridLayer } from './layers/hex-grid-layer';
 import { createPolygonLayer } from './layers/polygon-layer';
 import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
+import ConnectionBanner from '@/components/controls/ConnectionBanner';
 import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
@@ -200,16 +201,37 @@ export default function CoverageMap() {
     return result;
   }, [mode, hexData, polygonData, stations, highlightedStationId, selectedPolygonStationId]);
 
-  const getTooltip = useCallback(({ object }: any) => {
+  const getTooltip = useCallback(({ object, layer }: any) => {
     if (!object) return null;
-    if (object.h3) {
+
+    if (layer?.id === 'coverage-hexgrid' && object.h3) {
+      const lines = [
+        `${object.msgCount.toLocaleString()} messages`,
+        `Confidence: ${(object.confidence * 100).toFixed(0)}%`,
+        object.maxDistance > 0 ? `Max range: ${object.maxDistance.toFixed(0)} km` : null,
+        `${object.stationCount} station${object.stationCount !== 1 ? 's' : ''}`,
+        `Sources: ${object.sources.join(', ')}`,
+      ].filter(Boolean);
+      return { className: 'deck-tooltip', text: lines.join('\n') };
+    }
+
+    if (layer?.id === 'station-markers' && object.ident) {
+      const lines = [
+        object.ident,
+        object.sourceType.toUpperCase(),
+        `${object.messageCount.toLocaleString()} messages`,
+        object.maxDistance > 0 ? `Range: ${object.maxDistance.toFixed(0)} km` : null,
+      ].filter(Boolean);
+      return { className: 'deck-tooltip', text: lines.join('\n') };
+    }
+
+    if (layer?.id === 'coverage-polygons' && object.ident) {
       return {
-        text: `Messages: ${object.msgCount}\nConfidence: ${(object.confidence * 100).toFixed(0)}%\nMax Range: ${object.maxDistance.toFixed(0)} km`,
+        className: 'deck-tooltip',
+        text: `${object.ident}\n${object.messageCount.toLocaleString()} messages\nConfidence: ${(object.confidence * 100).toFixed(0)}%`,
       };
     }
-    if (object.ident) {
-      return { text: `${object.ident} (${object.sourceType})\n${object.messageCount} messages` };
-    }
+
     return null;
   }, []);
 
@@ -257,6 +279,7 @@ export default function CoverageMap() {
       </Map>
 
       <ControlPanel />
+      <ConnectionBanner />
 
       {selectedStation && (
         <StationPopup
