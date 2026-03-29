@@ -43,13 +43,11 @@ export function checkStationTrust(
     return { trusted: false, reason: `low trust score: ${station.trustScore}`, stationLat: station.latitude, stationLon: station.longitude };
   }
 
-  if (!Number.isFinite(station.latitude) || !Number.isFinite(station.longitude)) {
-    return { trusted: false, reason: 'station has no valid coordinates', stationLat: 0, stationLon: 0 };
-  }
-
+  // Station coordinates may be 0/null if GeoIP hasn't run — that's OK,
+  // the ingest layer will fall back to NATS payload coords if available.
   return {
     trusted: true,
-    stationLat: station.latitude,
-    stationLon: station.longitude,
+    stationLat: station.latitude ?? 0,
+    stationLon: station.longitude ?? 0,
   };
 }

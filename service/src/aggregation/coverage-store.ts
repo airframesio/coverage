@@ -53,27 +53,6 @@ export class CoverageStore {
    */
   ingest(event: CoverageEvent): void {
     // 1. Station trust check (uses synced metadata, not NATS payload)
-    // In dev mode, auto-register unknown stations from NATS payload coordinates
-    if (config.devAutoTrustStations && !this.stationMap.has(event.stationId)) {
-      const nLat = event._natsStationLat;
-      const nLon = event._natsStationLon;
-      if (nLat != null && nLon != null && Number.isFinite(nLat) && Number.isFinite(nLon)) {
-        this.stationMap.set(event.stationId, {
-          id: event.stationId,
-          uuid: event.stationUuid,
-          ident: `dev-${event.stationId}`,
-          latitude: nLat,
-          longitude: nLon,
-          sourceType: event.sourceType,
-          status: 'active',
-          flagged: false,
-          blocked: false,
-          trustScore: 0.5,
-          lastSyncedAt: new Date(),
-        });
-      }
-    }
-
     const trust = checkStationTrust(event, this.stationMap);
     if (!trust.trusted) {
       this.eventsRejected++;
@@ -86,9 +65,30 @@ export class CoverageStore {
       return;
     }
 
-    // 3. Use authoritative station coordinates from our synced data
-    const stationLat = trust.stationLat;
-    const stationLon = trust.stationLon;
+    // 3. Determine station coordinates
+    // Prefer authoritative (synced from main API), fall back to NATS payload
+    // when the synced station has no coordinates (common when GeoIP isn't populated)
+    let stationLat = trust.stationLat;
+    let stationLon = trust.stationLon;
+
+    const stationHasCoords = Number.isFinite(stationLat) && Number.isFinite(stationLon)
+      && !(Math.abs(stationLat) < 0.01 && Math.abs(stationLon) < 0.01);
+
+    if (!stationHasCoords && event._natsStationLat != null && event._natsStationLon != null) {
+      const nLat = event._natsStationLat;
+      const nLon = event._natsStationLon;
+      const nCheck = validateCoordinate(nLat, nLon);
+      if (nCheck.valid) {
+        stationLat = nLat;
+        stationLon = nLon;
+        // Update synced metadata so future events use these coords
+        const meta = this.stationMap.get(event.stationId);
+        if (meta) {
+          meta.latitude = nLat;
+          meta.longitude = nLon;
+        }
+      }
+    }
 
     // 4. Validate target coordinates if present
     let distance = 0;

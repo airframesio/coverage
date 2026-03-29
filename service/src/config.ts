@@ -19,6 +19,11 @@ export const config = {
   // This is ONLY for local development — NEVER enable in production
   devAutoTrustStations: process.env.DEV_AUTO_TRUST_STATIONS === 'true',
 
+  // Production API for enriching local stations with real coordinates.
+  // In local dev, station IPs are relayed/private so GeoIP returns nothing.
+  // Set this to the production API to match stations by ident and backfill coords.
+  stationEnrichUrl: process.env.STATION_ENRICH_URL || '',
+
   // WebSocket push intervals (ms)
   wsCoverageInterval: 5_000,
   wsStationInterval: 30_000,
