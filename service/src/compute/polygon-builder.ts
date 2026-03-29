@@ -2,43 +2,69 @@ import { destinationPoint } from './distance.js';
 import type { GeoJSONFeature, StationCoverage } from '../types/coverage.js';
 
 /**
- * Build a smoothed GeoJSON polygon from bearing sector data.
- * Each sector's max distance defines a vertex; sectors with no data
- * interpolate from neighbors. The result is a polygon surrounding the station.
+ * Build a GeoJSON polygon from bearing sector data.
+ * If enough sectors have data, builds a directional shape.
+ * If only 1-2 sectors, builds an ellipse stretched toward those sectors.
  */
 export function buildCoveragePolygon(
   stationLat: number,
   stationLon: number,
   coverage: StationCoverage,
 ): GeoJSONFeature | null {
-  const sectors = coverage.bearingSectors;
   if (coverage.messagesWithPosition === 0) return null;
 
-  // Find the max distance across all sectors for fallback
   const maxDist = coverage.maxDistance;
   if (maxDist <= 0) return null;
 
-  // Build raw vertices: one per 10-degree sector
-  const rawDistances: number[] = [];
+  // Count sectors with data
+  const nonZeroSectors: Array<{ index: number; distance: number }> = [];
   for (let i = 0; i < 36; i++) {
-    rawDistances.push(sectors[i] > 0 ? sectors[i] : 0);
+    if (coverage.bearingSectors[i] > 0) {
+      nonZeroSectors.push({ index: i, distance: coverage.bearingSectors[i] });
+    }
   }
 
-  // Interpolate gaps: sectors with 0 distance get linearly interpolated
-  // from nearest non-zero neighbors
-  const interpolated = interpolateGaps(rawDistances);
+  let coordinates: number[][];
 
-  // If still all zeros, no polygon
-  if (interpolated.every(d => d === 0)) return null;
+  if (nonZeroSectors.length >= 3) {
+    // Enough data for a directional polygon
+    const rawDistances: number[] = [];
+    for (let i = 0; i < 36; i++) {
+      rawDistances.push(coverage.bearingSectors[i] > 0 ? coverage.bearingSectors[i] : 0);
+    }
+    const interpolated = interpolateGaps(rawDistances);
+    coordinates = [];
+    for (let i = 0; i < 36; i++) {
+      const brng = i * 10 + 5;
+      const dist = interpolated[i];
+      if (dist > 0) {
+        const [lat, lon] = destinationPoint(stationLat, stationLon, dist, brng);
+        coordinates.push([lon, lat]);
+      }
+    }
+  } else {
+    // Few sectors: build an ellipse stretched toward the known sectors
+    // Use maxDist as the radius toward known sectors, and a fraction for other directions
+    const minRadius = maxDist * 0.3; // minimum radius in unknown directions
+    coordinates = [];
+    for (let i = 0; i < 36; i++) {
+      const brng = i * 10 + 5;
+      let dist = minRadius;
 
-  // Generate polygon vertices
-  const coordinates: number[][] = [];
-  for (let i = 0; i < 36; i++) {
-    const brng = i * 10 + 5; // center of sector
-    const dist = interpolated[i];
-    if (dist > 0) {
+      // Check if this sector (or a nearby sector) has data
+      for (const s of nonZeroSectors) {
+        const sectorAngle = s.index * 10 + 5;
+        const diff = Math.abs(brng - sectorAngle);
+        const angularDist = Math.min(diff, 360 - diff);
+        // Smoothly blend toward known sector distances
+        if (angularDist < 90) {
+          const blend = 1 - angularDist / 90;
+          dist = Math.max(dist, minRadius + (s.distance - minRadius) * blend);
+        }
+      }
+
       const [lat, lon] = destinationPoint(stationLat, stationLon, dist, brng);
-      coordinates.push([lon, lat]); // GeoJSON is [lon, lat]
+      coordinates.push([lon, lat]);
     }
   }
 
@@ -67,22 +93,19 @@ function interpolateGaps(distances: number[]): number[] {
   const result = [...distances];
   const n = result.length;
 
-  // Find first non-zero
   let firstNonZero = -1;
   for (let i = 0; i < n; i++) {
     if (result[i] > 0) { firstNonZero = i; break; }
   }
   if (firstNonZero === -1) return result;
 
-  // Walk around the circle, interpolating gaps
   let prevIdx = firstNonZero;
   let i = (firstNonZero + 1) % n;
   while (i !== firstNonZero) {
     if (result[i] > 0) {
-      // Fill gap between prevIdx and i
       const gapStart = prevIdx;
       const gapEnd = i;
-      let gapLen = (gapEnd - gapStart + n) % n;
+      const gapLen = (gapEnd - gapStart + n) % n;
       if (gapLen > 1) {
         const startVal = result[gapStart];
         const endVal = result[gapEnd];
@@ -97,7 +120,6 @@ function interpolateGaps(distances: number[]): number[] {
     i = (i + 1) % n;
   }
 
-  // Fill final gap (from last non-zero back to first non-zero)
   if (prevIdx !== firstNonZero) {
     const gapLen = (firstNonZero - prevIdx + n) % n;
     if (gapLen > 1) {
