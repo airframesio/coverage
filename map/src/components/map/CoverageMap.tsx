@@ -110,14 +110,16 @@ export default function CoverageMap() {
   const fetchPolygons = useCallback(async () => {
     const MARINE_TYPES = new Set(['aiscatcher', 'ais']);
 
-    const withPosition = stations.filter((s) => {
-      if (s.latitude === 0 && s.longitude === 0) return false;
-      if (s.messagesWithPosition <= 0) return false;
-      // Transport filter
-      if (transportFilter === 'aircraft' && MARINE_TYPES.has(s.sourceType)) return false;
-      if (transportFilter === 'marine' && !MARINE_TYPES.has(s.sourceType)) return false;
-      return true;
-    }).slice(0, 30);
+    const withPosition = stations
+      .filter((s) => {
+        if (s.latitude === 0 && s.longitude === 0) return false;
+        if (s.messagesWithPosition <= 0) return false;
+        if (transportFilter === 'aircraft' && MARINE_TYPES.has(s.sourceType)) return false;
+        if (transportFilter === 'marine' && !MARINE_TYPES.has(s.sourceType)) return false;
+        return true;
+      })
+      // Sort by messagesWithPosition so stations with most polygon data are fetched first
+      .sort((a, b) => b.messagesWithPosition - a.messagesWithPosition);
 
     const polygons: CoveragePolygon[] = [];
 
