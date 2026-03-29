@@ -245,6 +245,7 @@ export class CoverageStore {
         confidence,
         sources: Array.from(cell.sources),
         stationCount: cell.stationIds.size,
+        stationIds: Array.from(cell.stationIds),
         transportTypes: Array.from(cell.transportTypes),
       });
     }
@@ -278,25 +279,41 @@ export class CoverageStore {
    * reflects only messages within the selected time window.
    */
   getStationMessageCounts(windowName: string): Map<number, { messageCount: number; maxDistance: number }> {
-    // Use resolution 3 (coarse) to count — it covers all windows
-    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
-    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
-    if (ri === -1 || wi === -1) return new Map();
-
-    const window = this.windows[ri][wi];
-    const aggregated = window.getAggregated();
     const stationCounts = new Map<number, { messageCount: number; maxDistance: number }>();
 
-    for (const [, cell] of aggregated) {
-      for (const stationId of cell.stationIds) {
-        const existing = stationCounts.get(stationId);
-        if (existing) {
-          existing.messageCount += cell.messageCount;
-          existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
-        } else {
+    // Primary source: H3 sliding windows (tracks station IDs per cell)
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri !== -1 && wi !== -1) {
+      const window = this.windows[ri][wi];
+      const aggregated = window.getAggregated();
+      for (const [, cell] of aggregated) {
+        for (const stationId of cell.stationIds) {
+          const existing = stationCounts.get(stationId);
+          if (existing) {
+            existing.messageCount += cell.messageCount;
+            existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
+          } else {
+            stationCounts.set(stationId, {
+              messageCount: cell.messageCount,
+              maxDistance: cell.maxDistance,
+            });
+          }
+        }
+      }
+    }
+
+    // Fallback: station sliding windows (for data loaded from persistence
+    // where H3 cells may lack station IDs)
+    if (wi !== -1 && wi < this.stationWindows.length) {
+      const sw = this.stationWindows[wi];
+      for (const stationId of sw.activeStationIds()) {
+        if (stationCounts.has(stationId)) continue; // Already counted from H3
+        const cov = sw.getStationCoverage(stationId);
+        if (cov && cov.totalMessages > 0) {
           stationCounts.set(stationId, {
-            messageCount: cell.messageCount,
-            maxDistance: cell.maxDistance,
+            messageCount: cov.totalMessages,
+            maxDistance: cov.maxDistance,
           });
         }
       }
@@ -353,6 +370,9 @@ export class CoverageStore {
       }
       newCell.errorMessages = Math.round(cell.errorRate * cell.msgCount);
       for (const src of cell.sources) newCell.sources.add(src);
+      if (cell.stationIds) {
+        for (const sid of cell.stationIds) newCell.stationIds.add(sid);
+      }
       for (const tt of cell.transportTypes) newCell.transportTypes.add(tt as TransportType);
       slice.set(cell.h3, newCell);
     }

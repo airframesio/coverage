@@ -26,6 +26,7 @@ export interface CellResponse {
   confidence: number;
   sources: string[];
   stationCount: number;
+  stationIds: number[];
   transportTypes: string[];
 }
 
