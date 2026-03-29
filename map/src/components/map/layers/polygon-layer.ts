@@ -2,33 +2,52 @@ import { PolygonLayer } from '@deck.gl/layers';
 import { stationHue, hslToRgba } from '@/lib/constants/colors';
 import type { CoveragePolygon } from '@/lib/types/coverage';
 
-export function createPolygonLayer(data: CoveragePolygon[]) {
+export function createPolygonLayer(
+  data: CoveragePolygon[],
+  selectedStationId: number | null = null,
+) {
   return new PolygonLayer<CoveragePolygon>({
     id: 'coverage-polygons',
     data,
     pickable: true,
     stroked: true,
     filled: true,
+    extruded: true,
+    wireframe: true,
     getPolygon: (d) => d.coordinates[0],
+    getElevation: (d) =>
+      d.stationId === selectedStationId ? 800 : 0,
     getFillColor: (d) => {
+      const selected = d.stationId === selectedStationId;
       const hue = stationHue(d.stationId);
-      // Ensure fill is always visible: min alpha 40, max 120
+      if (selected) {
+        return hslToRgba(hue, 80, 60, 160);
+      }
       const alpha = Math.max(40, Math.min(120, Math.floor(d.confidence * 120 + 30)));
       return hslToRgba(hue, 65, 50, alpha);
     },
     getLineColor: (d) => {
+      const selected = d.stationId === selectedStationId;
       const hue = stationHue(d.stationId);
-      return hslToRgba(hue, 75, 60, 220);
+      return selected
+        ? hslToRgba(hue, 90, 75, 255)
+        : hslToRgba(hue, 75, 60, 220);
     },
-    getLineWidth: 2,
+    getLineWidth: (d) =>
+      d.stationId === selectedStationId ? 4 : 2,
     lineWidthMinPixels: 1.5,
-    lineWidthMaxPixels: 4,
+    lineWidthMaxPixels: 6,
+    elevationScale: 1,
     transitions: {
-      getFillColor: { duration: 500 },
+      getFillColor: { duration: 300 },
+      getElevation: { duration: 400 },
+      getLineWidth: { duration: 200 },
     },
     updateTriggers: {
-      getFillColor: [data],
-      getLineColor: [data],
+      getFillColor: [data, selectedStationId],
+      getLineColor: [data, selectedStationId],
+      getElevation: [selectedStationId],
+      getLineWidth: [selectedStationId],
     },
   });
 }

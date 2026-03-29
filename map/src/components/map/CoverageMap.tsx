@@ -55,6 +55,8 @@ export default function CoverageMap() {
 
   const [h3Resolution, setH3Resolution] = useState(() => zoomToH3Resolution(viewState.zoom));
   const zoomDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
+  const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
 
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
@@ -168,16 +170,18 @@ export default function CoverageMap() {
 
   // ── Deck.gl layers ──
 
+  const selectedPolygonStationId = selectedPolygon?.stationId ?? null;
+
   const layers = useMemo(() => {
     const result = [];
     if (mode === 'hexgrid') {
       result.push(createHexGridLayer(hexData));
     } else {
-      result.push(createPolygonLayer(polygonData));
+      result.push(createPolygonLayer(polygonData, selectedPolygonStationId));
     }
     result.push(createStationMarkersLayer(stations, selectedStationId));
     return result;
-  }, [mode, hexData, polygonData, stations, selectedStationId]);
+  }, [mode, hexData, polygonData, stations, selectedStationId, selectedPolygonStationId]);
 
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
@@ -191,9 +195,6 @@ export default function CoverageMap() {
     }
     return null;
   }, []);
-
-  const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
-  const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
 
   const onClick = useCallback((info: any) => {
     if (info.layer?.id === 'station-markers' && info.object) {
