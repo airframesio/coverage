@@ -332,6 +332,58 @@ export class CoverageStore {
     };
   }
 
+  /** Load a persisted H3 snapshot into the current sliding window slice */
+  loadH3Snapshot(windowName: string, resolution: number, cells: CellResponse[]): void {
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1) return;
+
+    const window = this.windows[ri][wi];
+    const slice = window.current;
+
+    for (const cell of cells) {
+      const existing = slice.get(cell.h3);
+      if (existing) continue; // Don't overwrite live data
+
+      const newCell = createEmptyCell();
+      newCell.messageCount = cell.msgCount;
+      newCell.maxDistance = cell.maxDistance;
+      if (cell.avgLevel !== null) {
+        newCell.totalLevel = cell.avgLevel * cell.msgCount;
+      }
+      newCell.errorMessages = Math.round(cell.errorRate * cell.msgCount);
+      for (const src of cell.sources) newCell.sources.add(src);
+      for (const tt of cell.transportTypes) newCell.transportTypes.add(tt as TransportType);
+      slice.set(cell.h3, newCell);
+    }
+  }
+
+  /** Load persisted station coverage into the current sliding window slice */
+  loadStationSnapshot(windowName: string, stationData: any[]): void {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1 || !this.stationWindows[wi]) return;
+
+    const sw = this.stationWindows[wi];
+    for (const s of stationData) {
+      if (!s.stationId || !s.bearingSectors) continue;
+      // Record each sector's data into the current slice
+      for (let i = 0; i < 36; i++) {
+        const dist = s.bearingSectors[i] ?? 0;
+        const count = s.sectorMessageCounts?.[i] ?? 0;
+        if (dist > 0 || count > 0) {
+          for (let j = 0; j < count; j++) {
+            sw.record(s.stationId, i, dist, s.sectorAvgLevels?.[i] ?? null, true, false);
+          }
+        }
+      }
+      // Record messages without position
+      const noPos = (s.totalMessages ?? 0) - (s.messagesWithPosition ?? 0);
+      for (let j = 0; j < noPos; j++) {
+        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, false, false);
+      }
+    }
+  }
+
   destroy(): void {
     for (const resWindows of this.windows) {
       for (const window of resWindows) {

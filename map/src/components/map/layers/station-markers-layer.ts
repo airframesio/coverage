@@ -28,7 +28,11 @@ export function createStationMarkersLayer(
     id: 'station-markers',
     data: visibleData,
     pickable: true,
-    getPosition: (d) => [d.longitude, d.latitude],
+    // Elevate highlighted station above polygon extrusion (800m)
+    getPosition: (d) =>
+      d.id === highlightedId
+        ? [d.longitude, d.latitude, 1200]
+        : [d.longitude, d.latitude, 0],
     getFillColor: (d) => {
       if (d.id === highlightedId) return SELECTED_COLOR;
       const rgb = SOURCE_COLORS[d.sourceType] ?? DEFAULT_COLOR;
@@ -50,6 +54,7 @@ export function createStationMarkersLayer(
     lineWidthMinPixels: 1,
     lineWidthMaxPixels: 4,
     updateTriggers: {
+      getPosition: [highlightedId],
       getFillColor: [highlightedId],
       getRadius: [highlightedId],
       getLineColor: [highlightedId],
