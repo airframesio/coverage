@@ -120,8 +120,8 @@
 /* Map theme custom properties */
 :root {
   --map-bg: #09090b;
-  --panel-bg: rgba(24, 24, 27, 0.7);
-  --panel-border: rgba(39, 39, 42, 0.5);
+  --panel-bg: rgba(9, 9, 11, 0.88);
+  --panel-border: rgba(39, 39, 42, 0.6);
   --coverage-accent: #34d399;
   --coverage-accent-dim: #065f46;
 }
