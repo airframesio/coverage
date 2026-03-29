@@ -11,9 +11,28 @@ export default function StatsBar() {
   const hexData = useCoverageStore((s) => s.hexData);
   const lastUpdated = useCoverageStore((s) => s.lastUpdated);
   const timeWindow = useUIStore((s) => s.timeWindow);
+  const viewState = useUIStore((s) => s.viewState);
   const flyTo = useUIStore((s) => s.flyTo);
 
   const totalMessages = stations.reduce((sum, s) => sum + s.messageCount, 0);
+
+  // Estimate coverage area from currently loaded hex cells.
+  // Average area per cell by H3 resolution (km²):
+  // res 2: ~86,745  res 3: ~12,393  res 4: ~1,770  res 5: ~253  res 6: ~36  res 7: ~5
+  const coverageAreaKm2 = useMemo(() => {
+    if (hexData.length === 0) return 0;
+    // Detect resolution from first cell index length (res 2=15chars, 3=15, 4=15... all 15)
+    // Instead use the map zoom to infer which resolution was fetched
+    const zoom = viewState.zoom;
+    let areaPerCell: number;
+    if (zoom <= 3) areaPerCell = 86745;
+    else if (zoom <= 5) areaPerCell = 12393;
+    else if (zoom <= 7) areaPerCell = 1770;
+    else if (zoom <= 9) areaPerCell = 253;
+    else if (zoom <= 11) areaPerCell = 36;
+    else areaPerCell = 5;
+    return Math.round(hexData.length * areaPerCell);
+  }, [hexData, viewState.zoom]);
 
   // Source type breakdown
   const sourceBreakdown = useMemo(() => {
@@ -64,7 +83,7 @@ export default function StatsBar() {
       {/* Main stats */}
       <div className="flex items-center justify-between">
         <Stat label="Stations" value={stations.length} />
-        <Stat label="Coverage" value={formatArea(stats?.coverageAreaKm2 ?? 0)} />
+        <Stat label="Coverage" value={formatArea(coverageAreaKm2)} />
         <Stat label="Messages" value={formatCount(totalMessages)} />
         <Stat label="msg/s" value={stats?.messagesPerSecond ?? 0} decimals={1} />
       </div>
