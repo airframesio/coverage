@@ -15,6 +15,7 @@ import ConnectionBanner from '@/components/controls/ConnectionBanner';
 import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
+import { useUrlState } from '@/lib/hooks/use-url-state';
 import type { CoverageHex, CoveragePolygon } from '@/lib/types/coverage';
 
 const POLL_INTERVAL = 10_000;
@@ -30,6 +31,8 @@ function DeckGLOverlay(props: any) {
 }
 
 export default function CoverageMap() {
+  useUrlState();
+
   const [viewState, setLocalViewState] = useState({
     longitude: MAP_CONFIG.initialViewState.longitude as number,
     latitude: MAP_CONFIG.initialViewState.latitude as number,
@@ -105,9 +108,16 @@ export default function CoverageMap() {
   }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
 
   const fetchPolygons = useCallback(async () => {
-    const withPosition = stations.filter(
-      (s) => s.latitude !== 0 && s.longitude !== 0 && s.messagesWithPosition > 0
-    ).slice(0, 30);
+    const MARINE_TYPES = new Set(['aiscatcher', 'ais']);
+
+    const withPosition = stations.filter((s) => {
+      if (s.latitude === 0 && s.longitude === 0) return false;
+      if (s.messagesWithPosition <= 0) return false;
+      // Transport filter
+      if (transportFilter === 'aircraft' && MARINE_TYPES.has(s.sourceType)) return false;
+      if (transportFilter === 'marine' && !MARINE_TYPES.has(s.sourceType)) return false;
+      return true;
+    }).slice(0, 30);
 
     const polygons: CoveragePolygon[] = [];
 
@@ -135,7 +145,7 @@ export default function CoverageMap() {
     );
 
     setPolygonData(polygons);
-  }, [stations, timeWindow, setPolygonData]);
+  }, [stations, timeWindow, transportFilter, setPolygonData]);
 
   const fetchStations = useCallback(async () => {
     try {

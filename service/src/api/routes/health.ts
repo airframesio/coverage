@@ -43,10 +43,15 @@ healthRoutes.get('/stats', (c) => {
   const uptime = process.uptime();
   const mps = uptime > 0 ? Math.round(stats.eventsProcessed / uptime * 10) / 10 : 0;
 
+  // Estimate coverage area from H3 res-3 cells (each ~12,400 km²)
+  const res3Cells = stats.activeCells[3] ?? 0;
+  const coverageAreaKm2 = Math.round(res3Cells * 12400);
+
   return c.json({
     messagesPerSecond: mps,
     activeStations: stats.stationsTracked,
     totalCells: stats.activeCells,
+    coverageAreaKm2,
     natsConnected: nats.isConnected(),
   });
 });

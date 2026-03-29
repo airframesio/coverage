@@ -280,18 +280,31 @@ export class CoverageStore {
    */
   getStationMessageCounts(windowName: string): Map<number, { messageCount: number; maxDistance: number }> {
     const stationCounts = new Map<number, { messageCount: number; maxDistance: number }>();
-
-    // Primary source: H3 sliding windows (tracks station IDs per cell)
-    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
-    if (ri !== -1 && wi !== -1) {
-      const window = this.windows[ri][wi];
+    if (wi === -1) return stationCounts;
+
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
+
+    // Scan the requested window AND all shorter windows.
+    // A station visible in a shorter window must appear in all longer windows.
+    // Use the requested window's counts as the primary, but ensure stations
+    // from shorter windows are included.
+    const windowsToCheck = ri !== -1
+      ? Array.from({ length: wi + 1 }, (_, i) => i)
+      : [];
+
+    for (const checkWi of windowsToCheck) {
+      if (ri === -1) continue;
+      const window = this.windows[ri][checkWi];
       const aggregated = window.getAggregated();
       for (const [, cell] of aggregated) {
         for (const stationId of cell.stationIds) {
           const existing = stationCounts.get(stationId);
           if (existing) {
-            existing.messageCount += cell.messageCount;
+            // Use the max values (longer window should have more data)
+            if (checkWi === wi) {
+              existing.messageCount += cell.messageCount;
+            }
             existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
           } else {
             stationCounts.set(stationId, {
@@ -303,12 +316,11 @@ export class CoverageStore {
       }
     }
 
-    // Fallback: station sliding windows (for data loaded from persistence
-    // where H3 cells may lack station IDs)
-    if (wi !== -1 && wi < this.stationWindows.length) {
-      const sw = this.stationWindows[wi];
+    // Also check station sliding windows (for persistence-loaded data)
+    for (let swi = 0; swi <= wi && swi < this.stationWindows.length; swi++) {
+      const sw = this.stationWindows[swi];
       for (const stationId of sw.activeStationIds()) {
-        if (stationCounts.has(stationId)) continue; // Already counted from H3
+        if (stationCounts.has(stationId)) continue;
         const cov = sw.getStationCoverage(stationId);
         if (cov && cov.totalMessages > 0) {
           stationCounts.set(stationId, {

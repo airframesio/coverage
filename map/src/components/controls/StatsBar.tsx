@@ -64,7 +64,7 @@ export default function StatsBar() {
       {/* Main stats */}
       <div className="flex items-center justify-between">
         <Stat label="Stations" value={stations.length} />
-        <Stat label="H3 Cells" value={hexData.length} />
+        <Stat label="Coverage" value={formatArea(stats?.coverageAreaKm2 ?? 0)} />
         <Stat label="Messages" value={formatCount(totalMessages)} />
         <Stat label="msg/s" value={stats?.messagesPerSecond ?? 0} decimals={1} />
       </div>
@@ -145,4 +145,10 @@ function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
   return String(n);
+}
+
+function formatArea(km2: number): string {
+  if (km2 >= 1_000_000) return `${(km2 / 1_000_000).toFixed(1)}M km²`;
+  if (km2 >= 1_000) return `${(km2 / 1_000).toFixed(0)}k km²`;
+  return `${km2} km²`;
 }

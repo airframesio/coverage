@@ -47,6 +47,7 @@ export interface CoverageStats {
   messagesPerSecond: number;
   activeStations: number;
   totalCells: Record<string, number>;
+  coverageAreaKm2: number;
   natsConnected: boolean;
 }
 
