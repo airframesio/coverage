@@ -50,27 +50,33 @@ coverageRoutes.get('/stations/:id', (c) => {
     return c.json({ error: 'Invalid station ID' }, 400);
   }
 
-  const coverage = store.getStationCoverage(stationId, windowName);
-  if (!coverage) {
-    return c.json({ error: 'No coverage data for this station' }, 404);
-  }
-
   const station = store.stationMap.get(stationId);
   if (!station) {
     return c.json({ error: 'Station not found' }, 404);
   }
 
-  // Build polygon from bearing sectors
-  const polygon = buildCoveragePolygon(station.latitude, station.longitude, coverage);
+  // Window-scoped message counts from H3 sliding windows (properly expires)
+  const windowCounts = store.getStationMessageCounts(windowName);
+  const windowData = windowCounts.get(stationId);
 
-  // Build sector details
+  if (!windowData || windowData.messageCount === 0) {
+    return c.json({ error: 'No coverage data for this station in this window' }, 404);
+  }
+
+  // Bearing sector data (cumulative best-observed range per direction)
+  const coverage = store.getStationCoverage(stationId, windowName);
+
+  const polygon = coverage
+    ? buildCoveragePolygon(station.latitude, station.longitude, coverage)
+    : null;
+
   const bearingSectors = [];
   for (let i = 0; i < 36; i++) {
     bearingSectors.push({
       bearing: i * 10,
-      distance: Math.round(coverage.bearingSectors[i] * 10) / 10,
-      msgCount: coverage.sectorMessageCounts[i],
-      avgLevel: coverage.sectorAvgLevels[i] !== 0
+      distance: coverage ? Math.round(coverage.bearingSectors[i] * 10) / 10 : 0,
+      msgCount: coverage ? coverage.sectorMessageCounts[i] : 0,
+      avgLevel: coverage && coverage.sectorAvgLevels[i] !== 0
         ? Math.round(coverage.sectorAvgLevels[i] * 10) / 10
         : null,
     });
@@ -82,12 +88,12 @@ coverageRoutes.get('/stations/:id', (c) => {
     position: { lat: station.latitude, lon: station.longitude },
     sourceType: station.sourceType,
     window: windowName,
-    messageCount: coverage.totalMessages,
-    messagesWithPosition: coverage.messagesWithPosition,
-    avgLevel: coverage.avgLevel !== 0 ? Math.round(coverage.avgLevel * 10) / 10 : null,
-    errorRate: Math.round(coverage.errorRate * 1000) / 1000,
-    maxDistance: Math.round(coverage.maxDistance * 10) / 10,
-    confidence: coverage.confidence,
+    messageCount: windowData.messageCount,
+    messagesWithPosition: coverage?.messagesWithPosition ?? 0,
+    avgLevel: coverage && coverage.avgLevel !== 0 ? Math.round(coverage.avgLevel * 10) / 10 : null,
+    errorRate: coverage ? Math.round(coverage.errorRate * 1000) / 1000 : 0,
+    maxDistance: Math.round(windowData.maxDistance * 10) / 10,
+    confidence: coverage?.confidence ?? 0,
     bearingSectors,
     polygon,
   });
