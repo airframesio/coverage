@@ -15,11 +15,6 @@ export function createHexGridLayer(data: CoverageHex[]) {
     getLineColor: [255, 255, 255, 30],
     lineWidthMinPixels: 0.5,
     opacity: 0.85,
-    transitions: {
-      getFillColor: { duration: 400 },
-    },
-    updateTriggers: {
-      getFillColor: [data],
-    },
+    // No transitions — data refreshes every 10s and transitions cause flicker
   });
 }

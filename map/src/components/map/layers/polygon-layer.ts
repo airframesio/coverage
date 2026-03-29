@@ -38,14 +38,13 @@ export function createPolygonLayer(
     lineWidthMinPixels: 1.5,
     lineWidthMaxPixels: 6,
     elevationScale: 1,
+    // Only transition elevation on selection change — no transitions on data refresh
     transitions: {
-      getFillColor: { duration: 300 },
       getElevation: { duration: 400 },
-      getLineWidth: { duration: 200 },
     },
     updateTriggers: {
-      getFillColor: [data, selectedStationId],
-      getLineColor: [data, selectedStationId],
+      getFillColor: [selectedStationId],
+      getLineColor: [selectedStationId],
       getElevation: [selectedStationId],
       getLineWidth: [selectedStationId],
     },
