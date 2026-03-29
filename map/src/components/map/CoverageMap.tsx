@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Map, NavigationControl, useControl } from 'react-map-gl/maplibre';
 import { MapboxOverlay } from '@deck.gl/mapbox';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -13,9 +13,12 @@ import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import StationPopup from '@/components/station/StationPopup';
 
-import type { MapLayerMouseEvent } from 'react-map-gl/maplibre';
+const POLL_INTERVAL = 10_000;   // Refresh data every 10s
+const STATS_INTERVAL = 5_000;   // Refresh stats every 5s
+const ZOOM_DEBOUNCE = 800;      // Wait 800ms after zoom stops before re-fetching
 
-/** Hook that creates a Deck.gl overlay as a MapLibre control */
+const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
+
 function DeckGLOverlay(props: any) {
   const overlay = useControl(() => new MapboxOverlay({ interleaved: true }));
   overlay.setProps(props);
@@ -44,88 +47,95 @@ export default function CoverageMap() {
   const setHexData = useCoverageStore((s) => s.setHexData);
   const setStations = useCoverageStore((s) => s.setStations);
   const setStats = useCoverageStore((s) => s.setStats);
-  const setLoading = useCoverageStore((s) => s.setLoading);
+  const setRefreshing = useCoverageStore((s) => s.setRefreshing);
 
-  const apiUrl = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
+  // Track the current H3 resolution (debounced from zoom changes)
+  const [h3Resolution, setH3Resolution] = useState(() => zoomToH3Resolution(viewState.zoom));
+  const zoomDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Build Deck.gl layers
-  const layers = useMemo(() => {
-    const result = [];
-
-    if (mode === 'hexgrid') {
-      result.push(createHexGridLayer(hexData));
-    } else {
-      result.push(createPolygonLayer(polygonData));
-    }
-
-    result.push(createStationMarkersLayer(stations, selectedStationId));
-
-    return result;
-  }, [mode, hexData, polygonData, stations, selectedStationId]);
-
+  // Debounce zoom → H3 resolution changes
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
   }, []);
 
   const onMoveEnd = useCallback((evt: { viewState: typeof viewState }) => {
     setViewState(evt.viewState);
+    // Debounce the H3 resolution change to avoid rapid re-fetches during zoom
+    clearTimeout(zoomDebounceRef.current);
+    zoomDebounceRef.current = setTimeout(() => {
+      setH3Resolution(zoomToH3Resolution(evt.viewState.zoom));
+    }, ZOOM_DEBOUNCE);
   }, [setViewState]);
 
-  // Fetch coverage data when timeWindow or transport changes
-  useEffect(() => {
-    const resolution = zoomToH3Resolution(viewState.zoom);
+  // ── Data fetching: silent background refresh, no flicker ──
 
-    async function fetchData() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          window: timeWindow,
-          resolution: String(resolution),
-          transport: transportFilter,
-        });
-        const res = await fetch(`${apiUrl}/api/v1/coverage/h3?${params}`);
-        if (res.ok) {
-          const data = await res.json();
-          setHexData(data.cells ?? []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch coverage data:', err);
+  const fetchCoverage = useCallback(async (silent: boolean) => {
+    if (!silent) setRefreshing(true);
+    try {
+      const params = new URLSearchParams({
+        window: timeWindow,
+        resolution: String(h3Resolution),
+        transport: transportFilter,
+      });
+      const res = await fetch(`${API_URL}/api/v1/coverage/h3?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        setHexData(data.cells ?? []);
       }
-    }
+    } catch { /* silently retry on next interval */ }
+  }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
 
-    fetchData();
-  }, [timeWindow, transportFilter, apiUrl, setHexData, setLoading, viewState.zoom]);
-
-  // Fetch stations
-  useEffect(() => {
-    async function fetchStations() {
-      try {
-        const res = await fetch(`${apiUrl}/api/v1/stations?window=${timeWindow}`);
-        if (res.ok) {
-          const data = await res.json();
-          setStations(data.stations ?? []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch stations:', err);
+  const fetchStations = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/stations?window=${timeWindow}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStations(data.stations ?? []);
       }
-    }
+    } catch { /* retry on next interval */ }
+  }, [timeWindow, setStations]);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/stats`);
+      if (res.ok) setStats(await res.json());
+    } catch { /* ignore */ }
+  }, [setStats]);
+
+  // Initial fetch + re-fetch when params change
+  useEffect(() => {
+    fetchCoverage(false);
     fetchStations();
-  }, [timeWindow, apiUrl, setStations]);
+  }, [fetchCoverage, fetchStations]);
 
-  // Fetch stats periodically
+  // Periodic silent refresh for coverage + stations
   useEffect(() => {
-    async function fetchStats() {
-      try {
-        const res = await fetch(`${apiUrl}/api/v1/stats`);
-        if (res.ok) setStats(await res.json());
-      } catch { /* ignore */ }
-    }
-    fetchStats();
-    const interval = setInterval(fetchStats, 10_000);
+    const interval = setInterval(() => {
+      fetchCoverage(true);
+      fetchStations();
+    }, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [apiUrl, setStats]);
+  }, [fetchCoverage, fetchStations]);
 
-  const selectedStation = stations.find((s) => s.id === selectedStationId) ?? null;
+  // Stats on a faster interval
+  useEffect(() => {
+    fetchStats();
+    const interval = setInterval(fetchStats, STATS_INTERVAL);
+    return () => clearInterval(interval);
+  }, [fetchStats]);
+
+  // ── Deck.gl layers ──
+
+  const layers = useMemo(() => {
+    const result = [];
+    if (mode === 'hexgrid') {
+      result.push(createHexGridLayer(hexData));
+    } else {
+      result.push(createPolygonLayer(polygonData));
+    }
+    result.push(createStationMarkersLayer(stations, selectedStationId));
+    return result;
+  }, [mode, hexData, polygonData, stations, selectedStationId]);
 
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
@@ -147,6 +157,8 @@ export default function CoverageMap() {
       selectStation(null);
     }
   }, [selectStation]);
+
+  const selectedStation = stations.find((s) => s.id === selectedStationId) ?? null;
 
   return (
     <div className="h-screen w-screen relative">

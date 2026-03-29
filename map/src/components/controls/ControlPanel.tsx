@@ -13,7 +13,8 @@ import TopStations from './TopStations';
 export default function ControlPanel() {
   const panelCollapsed = useUIStore((s) => s.panelCollapsed);
   const setPanelCollapsed = useUIStore((s) => s.setPanelCollapsed);
-  const isLoading = useCoverageStore((s) => s.isLoading);
+  const refreshing = useCoverageStore((s) => s.refreshing);
+  const initialLoading = useCoverageStore((s) => s.initialLoading);
 
   return (
     <>
@@ -28,8 +29,8 @@ export default function ControlPanel() {
             WebkitBackdropFilter: 'blur(24px)',
           }}
         >
-          <Image src="/airframes-logo.svg" alt="Airframes" width={120} height={19} priority />
-          <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-widest">
+          <Image src="/airframes-logo.svg" alt="Airframes" width={120} height={19} className="flex-shrink-0" priority />
+          <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase tracking-widest leading-none self-center mt-px">
             Coverage
           </span>
         </div>
@@ -49,8 +50,13 @@ export default function ControlPanel() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">Controls</span>
-              {isLoading && (
-                <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              {(refreshing || initialLoading) && (
+                <div
+                  className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                  style={{
+                    animation: 'pulse-dot 1.5s ease-in-out infinite',
+                  }}
+                />
               )}
             </div>
             <button
