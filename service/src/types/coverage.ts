@@ -83,8 +83,9 @@ export interface WindowConfig {
   slices: number;
 }
 
-/** Window configurations - oldest (5m) to newest (1mo) */
+/** Window configurations - oldest (1m) to newest (1mo) */
 export const WINDOW_CONFIGS: WindowConfig[] = [
+  { name: '1m',  windowMs: 60_000,           sliceMs: 5_000,        slices: 12 },
   { name: '5m',  windowMs: 5 * 60_000,       sliceMs: 15_000,       slices: 20 },
   { name: '30m', windowMs: 30 * 60_000,      sliceMs: 60_000,       slices: 30 },
   { name: '1h',  windowMs: 60 * 60_000,      sliceMs: 120_000,      slices: 30 },
@@ -97,10 +98,10 @@ export const WINDOW_CONFIGS: WindowConfig[] = [
 
 /** H3 resolution config: which resolutions are maintained for which windows */
 export const H3_RESOLUTION_CONFIGS = [
-  { resolution: 2, maxWindowIndex: 7 },  // All windows
-  { resolution: 3, maxWindowIndex: 7 },  // All windows
-  { resolution: 4, maxWindowIndex: 7 },  // All windows
-  { resolution: 5, maxWindowIndex: 5 },  // Up to 24h
-  { resolution: 6, maxWindowIndex: 3 },  // Up to 6h
-  { resolution: 7, maxWindowIndex: 2 },  // Up to 1h
+  { resolution: 2, maxWindowIndex: 8 },  // All windows
+  { resolution: 3, maxWindowIndex: 8 },  // All windows
+  { resolution: 4, maxWindowIndex: 8 },  // All windows
+  { resolution: 5, maxWindowIndex: 6 },  // Up to 24h
+  { resolution: 6, maxWindowIndex: 4 },  // Up to 6h
+  { resolution: 7, maxWindowIndex: 3 },  // Up to 1h
 ] as const;

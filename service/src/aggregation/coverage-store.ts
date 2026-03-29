@@ -318,7 +318,7 @@ export class CoverageStore {
     for (let ri = 0; ri < H3_RESOLUTION_CONFIGS.length; ri++) {
       const res = H3_RESOLUTION_CONFIGS[ri].resolution;
       // Use the 1h window as representative
-      const wi = 2;
+      const wi = WINDOW_CONFIGS.findIndex(c => c.name === '1h');
       activeCells[res] = this.windows[ri][wi].activeCells();
     }
 
@@ -327,7 +327,7 @@ export class CoverageStore {
       eventsRejected: this.eventsRejected,
       eventsWithPosition: this.eventsWithPosition,
       eventsWithoutPosition: this.eventsWithoutPosition,
-      stationsTracked: this.stationWindows.length > 0 ? this.stationWindows[2].activeStationIds().size : 0,
+      stationsTracked: this.stationWindows.length > 3 ? this.stationWindows[3].activeStationIds().size : 0,
       activeCells,
     };
   }

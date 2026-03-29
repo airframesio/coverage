@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { DEFAULT_TIME_WINDOW } from '../constants/time-windows';
 import type { TimeWindowKey } from '../constants/time-windows';
 
 interface ViewState {
@@ -30,7 +31,7 @@ export const useUIStore = create<UIState>()(
   persist(
     (set) => ({
       mode: 'hexgrid',
-      timeWindow: '1h',
+      timeWindow: DEFAULT_TIME_WINDOW,
       transportFilter: 'all',
       selectedStationId: null,
       panelCollapsed: false,
