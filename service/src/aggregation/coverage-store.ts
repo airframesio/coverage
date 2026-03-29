@@ -1,4 +1,5 @@
 import { SlidingWindow, createEmptyCell, mergeIntoCell } from './sliding-window.js';
+import { StationSlidingWindow } from './station-window.js';
 import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
 import { computeConfidence } from '../compute/signal-analysis.js';
@@ -18,8 +19,8 @@ import type { CoverageEvent, StationMeta, TransportType } from '../types/events.
 export class CoverageStore {
   /** windows[resolutionIdx][windowIdx] = SlidingWindow */
   private windows: SlidingWindow[][] = [];
-  /** Per-station directional coverage: stationId -> windowName -> StationCoverage */
-  private stationCoverage = new Map<number, Map<string, StationCoverage>>();
+  /** Per-station directional coverage with sliding windows: one per window config */
+  private stationWindows: StationSlidingWindow[] = [];
   /** Synced station metadata from main API */
   public stationMap = new Map<number, StationMeta>();
   /** Rate limiter */
@@ -44,6 +45,11 @@ export class CoverageStore {
         }
       }
       this.windows.push(resWindows);
+    }
+
+    // Initialize station sliding windows (one per time window config)
+    for (const wc of WINDOW_CONFIGS) {
+      this.stationWindows.push(new StationSlidingWindow(wc));
     }
   }
 
@@ -175,66 +181,24 @@ export class CoverageStore {
 
   private updateStationCoverage(
     event: CoverageEvent,
-    stationLat: number,
-    stationLon: number,
+    _stationLat: number,
+    _stationLon: number,
     distance: number,
     brng: number,
     hasValidTarget: boolean,
   ): void {
-    let stationWindows = this.stationCoverage.get(event.stationId);
-    if (!stationWindows) {
-      stationWindows = new Map();
-      this.stationCoverage.set(event.stationId, stationWindows);
-    }
+    const sector = hasValidTarget ? bearingToSector(brng) : -1;
+    const hasError = event.errorCount !== null && event.errorCount > 0;
 
-    for (const wc of WINDOW_CONFIGS) {
-      let cov = stationWindows.get(wc.name);
-      if (!cov) {
-        cov = {
-          stationId: event.stationId,
-          bearingSectors: new Float64Array(36),
-          sectorMessageCounts: new Uint32Array(36),
-          sectorAvgLevels: new Float64Array(36),
-          totalMessages: 0,
-          messagesWithPosition: 0,
-          maxDistance: 0,
-          avgLevel: 0,
-          errorRate: 0,
-          confidence: 0,
-          lastUpdated: Date.now(),
-        };
-        stationWindows.set(wc.name, cov);
-      }
-
-      cov.totalMessages++;
-      cov.lastUpdated = Date.now();
-
-      if (hasValidTarget) {
-        cov.messagesWithPosition++;
-        if (distance > cov.maxDistance) cov.maxDistance = distance;
-
-        const sector = bearingToSector(brng);
-        if (distance > cov.bearingSectors[sector]) {
-          cov.bearingSectors[sector] = distance;
-        }
-        cov.sectorMessageCounts[sector]++;
-
-        if (event.signalLevel !== null) {
-          // Running average
-          const prevAvg = cov.sectorAvgLevels[sector];
-          const count = cov.sectorMessageCounts[sector];
-          cov.sectorAvgLevels[sector] = prevAvg + (event.signalLevel - prevAvg) / count;
-        }
-      }
-
-      if (event.signalLevel !== null) {
-        const prevAvg = cov.avgLevel;
-        cov.avgLevel = prevAvg + (event.signalLevel - prevAvg) / cov.totalMessages;
-      }
-
-      if (event.errorCount !== null && event.errorCount > 0) {
-        cov.errorRate = (cov.errorRate * (cov.totalMessages - 1) + 1) / cov.totalMessages;
-      }
+    for (const sw of this.stationWindows) {
+      sw.record(
+        event.stationId,
+        sector,
+        distance,
+        event.signalLevel,
+        hasValidTarget,
+        hasError,
+      );
     }
   }
 
@@ -288,19 +252,22 @@ export class CoverageStore {
     return results;
   }
 
-  /** Get station coverage data for a specific station and window */
+  /** Get station coverage data for a specific station and window (sliding window scoped) */
   getStationCoverage(stationId: number, windowName: string): StationCoverage | null {
-    return this.stationCoverage.get(stationId)?.get(windowName) ?? null;
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1) return null;
+    return this.stationWindows[wi].getStationCoverage(stationId);
   }
 
   /** Get all stations with coverage data for a given window */
   getAllStationCoverage(windowName: string): StationCoverage[] {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1) return [];
+    const sw = this.stationWindows[wi];
     const results: StationCoverage[] = [];
-    for (const [, windows] of this.stationCoverage) {
-      const cov = windows.get(windowName);
-      if (cov && cov.totalMessages > 0) {
-        results.push(cov);
-      }
+    for (const id of sw.activeStationIds()) {
+      const cov = sw.getStationCoverage(id);
+      if (cov && cov.totalMessages > 0) results.push(cov);
     }
     return results;
   }
@@ -360,7 +327,7 @@ export class CoverageStore {
       eventsRejected: this.eventsRejected,
       eventsWithPosition: this.eventsWithPosition,
       eventsWithoutPosition: this.eventsWithoutPosition,
-      stationsTracked: this.stationCoverage.size,
+      stationsTracked: this.stationWindows.length > 0 ? this.stationWindows[2].activeStationIds().size : 0,
       activeCells,
     };
   }
@@ -371,6 +338,7 @@ export class CoverageStore {
         window.destroy();
       }
     }
+    for (const sw of this.stationWindows) sw.destroy();
     this.rateLimiter.destroy();
   }
 }

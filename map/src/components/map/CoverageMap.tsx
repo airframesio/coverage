@@ -171,6 +171,8 @@ export default function CoverageMap() {
   // ── Deck.gl layers ──
 
   const selectedPolygonStationId = selectedPolygon?.stationId ?? null;
+  // Highlight the station marker for either direct station click or polygon click
+  const highlightedStationId = selectedStationId ?? selectedPolygonStationId;
 
   const layers = useMemo(() => {
     const result = [];
@@ -179,9 +181,9 @@ export default function CoverageMap() {
     } else {
       result.push(createPolygonLayer(polygonData, selectedPolygonStationId));
     }
-    result.push(createStationMarkersLayer(stations, selectedStationId));
+    result.push(createStationMarkersLayer(stations, highlightedStationId));
     return result;
-  }, [mode, hexData, polygonData, stations, selectedStationId, selectedPolygonStationId]);
+  }, [mode, hexData, polygonData, stations, highlightedStationId, selectedPolygonStationId]);
 
   const getTooltip = useCallback(({ object }: any) => {
     if (!object) return null;
