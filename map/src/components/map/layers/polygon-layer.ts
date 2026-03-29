@@ -18,20 +18,18 @@ export function createPolygonLayer(
     getElevation: (d) =>
       d.stationId === selectedStationId ? 800 : 0,
     getFillColor: (d) => {
-      const selected = d.stationId === selectedStationId;
       const hue = stationHue(d.stationId);
-      if (selected) {
+      if (d.stationId === selectedStationId) {
         return hslToRgba(hue, 80, 60, 160);
       }
-      const alpha = Math.max(40, Math.min(120, Math.floor(d.confidence * 120 + 30)));
-      return hslToRgba(hue, 65, 50, alpha);
+      return hslToRgba(hue, 65, 50, 70);
     },
     getLineColor: (d) => {
-      const selected = d.stationId === selectedStationId;
       const hue = stationHue(d.stationId);
-      return selected
-        ? hslToRgba(hue, 90, 75, 255)
-        : hslToRgba(hue, 75, 60, 220);
+      if (d.stationId === selectedStationId) {
+        return hslToRgba(hue, 90, 75, 255);
+      }
+      return hslToRgba(hue, 75, 60, 220);
     },
     getLineWidth: (d) =>
       d.stationId === selectedStationId ? 4 : 2,
