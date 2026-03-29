@@ -2,7 +2,8 @@ import { connect, type NatsConnection, type Subscription, StringCodec, credsAuth
 import { config } from '../config.js';
 import { parseAircraftMessage, parseAircraftFlight } from './parsers/aircraft.js';
 import { parseVoyagePosition, parseVoyage, parseAisMessage } from './parsers/marine.js';
-import type { CoverageEvent } from '../types/events.js';
+import { parseRawForPosition } from './parsers/raw-decoder.js';
+import type { CoverageEvent, StationMeta } from '../types/events.js';
 
 const sc = StringCodec();
 
@@ -27,18 +28,43 @@ const SUBSCRIPTIONS: Array<{
   { subject: 'v1.marine.ais_message.created', parser: parseAisMessage },
 ];
 
+/** Raw subjects for extracting positions from decoder output */
+const RAW_SUBSCRIPTIONS = [
+  'v1.aircraft.ingest.dumpvdl2-tcp.raw',
+  'v1.aircraft.ingest.dumpvdl2-udp.raw',
+  'v1.aircraft.ingest.dumphfdl-tcp.raw',
+  'v1.aircraft.ingest.dumphfdl-zmq.raw',
+];
+
 export class NatsSubscriber {
   private nc: NatsConnection | null = null;
   private subscriptions: Subscription[] = [];
   private onEvent: (event: CoverageEvent) => void;
+  /** Station UUID→ID lookup for raw message processing */
+  private stationMap: Map<number, StationMeta> | null = null;
+  private uuidToId: Map<string, number> = new Map();
 
   // Metrics
   public messagesReceived = 0;
   public messagesParsed = 0;
   public parseErrors = 0;
+  public rawPositionsFound = 0;
 
-  constructor(onEvent: (event: CoverageEvent) => void) {
+  constructor(
+    onEvent: (event: CoverageEvent) => void,
+    stationMap?: Map<number, StationMeta>,
+  ) {
     this.onEvent = onEvent;
+    this.stationMap = stationMap ?? null;
+  }
+
+  /** Rebuild UUID→ID index from station map */
+  refreshUuidIndex(): void {
+    if (!this.stationMap) return;
+    this.uuidToId.clear();
+    for (const [id, meta] of this.stationMap) {
+      if (meta.uuid) this.uuidToId.set(meta.uuid, id);
+    }
   }
 
   async connect(): Promise<void> {
@@ -49,7 +75,6 @@ export class NatsSubscriber {
       reconnectTimeWait: 2000,
     };
 
-    // Use JWT + NKEY auth if configured
     if (config.natsJwt && config.natsNkeySeed) {
       const creds = new TextEncoder().encode(
         `-----BEGIN NATS USER JWT-----\n${config.natsJwt}\n------END NATS USER JWT------\n\n-----BEGIN USER NKEY SEED-----\n${config.natsNkeySeed}\n------END USER NKEY SEED------\n`
@@ -60,20 +85,28 @@ export class NatsSubscriber {
     this.nc = await connect(opts);
     console.log(`[NATS] Connected to ${config.natsUrl}`);
 
-    // Subscribe to all subjects
+    // Subscribe to processed subjects
     for (const { subject, parser } of SUBSCRIPTIONS) {
       const sub = this.nc.subscribe(subject);
       this.subscriptions.push(sub);
-      this.processSubscription(sub, parser, subject);
+      this.processSubscription(sub, parser);
     }
 
-    console.log(`[NATS] Subscribed to ${SUBSCRIPTIONS.length} subject patterns`);
+    // Subscribe to raw subjects for position extraction
+    for (const subject of RAW_SUBSCRIPTIONS) {
+      const sub = this.nc.subscribe(subject);
+      this.subscriptions.push(sub);
+      this.processRawSubscription(sub);
+    }
+
+    this.refreshUuidIndex();
+
+    console.log(`[NATS] Subscribed to ${SUBSCRIPTIONS.length} processed + ${RAW_SUBSCRIPTIONS.length} raw subject patterns`);
   }
 
   private async processSubscription(
     sub: Subscription,
     parser: (data: any) => CoverageEvent | null,
-    subject: string,
   ): Promise<void> {
     for await (const msg of sub) {
       this.messagesReceived++;
@@ -86,6 +119,32 @@ export class NatsSubscriber {
         }
       } catch {
         this.parseErrors++;
+      }
+    }
+  }
+
+  /** Process raw decoder messages to extract positions not available in processed events */
+  private async processRawSubscription(sub: Subscription): Promise<void> {
+    for await (const msg of sub) {
+      try {
+        const payload = JSON.parse(sc.decode(msg.data));
+        const event = parseRawForPosition(payload);
+        if (event && event.hasTargetPosition) {
+          // Resolve station UUID to ID
+          if (event.stationId === 0 && event.stationUuid) {
+            const id = this.uuidToId.get(event.stationUuid);
+            if (id) {
+              event.stationId = id;
+            } else {
+              continue; // Can't process without station ID
+            }
+          }
+          this.rawPositionsFound++;
+          this.messagesParsed++;
+          this.onEvent(event);
+        }
+      } catch {
+        // Raw messages may not always be valid JSON
       }
     }
   }

@@ -19,7 +19,8 @@ async function main() {
   await stationSync.start();
 
   // 3. Connect to NATS and start ingesting
-  const nats = new NatsSubscriber((event) => store.ingest(event));
+  // Pass the station map so raw message parser can resolve UUIDs to IDs
+  const nats = new NatsSubscriber((event) => store.ingest(event), store.stationMap);
   try {
     await nats.connect();
   } catch (err) {
@@ -40,13 +41,14 @@ async function main() {
     console.log(`[API] Stations: http://localhost:${info.port}/api/v1/stations?window=1h`);
   });
 
-  // 5. Periodic stats logging
+  // 5. Periodic stats logging + UUID index refresh
   setInterval(() => {
+    nats.refreshUuidIndex(); // Keep UUID→ID mapping fresh after station syncs
     const stats = store.getStats();
     console.log(
       `[Stats] processed=${stats.eventsProcessed} rejected=${stats.eventsRejected} ` +
       `withPos=${stats.eventsWithPosition} noPos=${stats.eventsWithoutPosition} ` +
-      `stations=${stats.stationsTracked} ` +
+      `stations=${stats.stationsTracked} rawPositions=${nats.rawPositionsFound} ` +
       `nats: recv=${nats.messagesReceived} parsed=${nats.messagesParsed} errors=${nats.parseErrors}`
     );
   }, 30_000);
