@@ -305,6 +305,39 @@ export class CoverageStore {
     return results;
   }
 
+  /**
+   * Get per-station message counts derived from the H3 sliding windows.
+   * Unlike StationCoverage (which accumulates forever), this properly
+   * reflects only messages within the selected time window.
+   */
+  getStationMessageCounts(windowName: string): Map<number, { messageCount: number; maxDistance: number }> {
+    // Use resolution 3 (coarse) to count — it covers all windows
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1) return new Map();
+
+    const window = this.windows[ri][wi];
+    const aggregated = window.getAggregated();
+    const stationCounts = new Map<number, { messageCount: number; maxDistance: number }>();
+
+    for (const [, cell] of aggregated) {
+      for (const stationId of cell.stationIds) {
+        const existing = stationCounts.get(stationId);
+        if (existing) {
+          existing.messageCount += cell.messageCount;
+          existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
+        } else {
+          stationCounts.set(stationId, {
+            messageCount: cell.messageCount,
+            maxDistance: cell.maxDistance,
+          });
+        }
+      }
+    }
+
+    return stationCounts;
+  }
+
   /** Get summary metrics */
   getStats(): {
     eventsProcessed: number;
