@@ -30,7 +30,7 @@ export default function ControlPanel() {
           }}
         >
           <Image src="/airframes-logo.svg" alt="Airframes" width={120} height={19} className="flex-shrink-0" priority />
-          <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase tracking-widest leading-none self-center mt-px">
+          <span className="text-[9px] font-mono font-bold text-emerald-400 uppercase tracking-widest leading-none self-center mt-[3px]">
             Coverage
           </span>
         </div>
