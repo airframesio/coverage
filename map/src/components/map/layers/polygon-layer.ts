@@ -25,12 +25,10 @@ export function createPolygonLayer(data: CoveragePolygon[]) {
     lineWidthMaxPixels: 4,
     transitions: {
       getFillColor: { duration: 500 },
-      getPolygon: { duration: 600, type: 'interpolation' },
     },
     updateTriggers: {
       getFillColor: [data],
       getLineColor: [data],
-      getPolygon: [data],
     },
   });
 }
