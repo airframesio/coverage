@@ -96,6 +96,9 @@ export class CoverageStore {
       }
     }
 
+    const stationLocated = Number.isFinite(stationLat) && Number.isFinite(stationLon)
+      && !(Math.abs(stationLat) < 0.01 && Math.abs(stationLon) < 0.01);
+
     // 4. Validate target coordinates if present
     let distance = 0;
     let brng = 0;
@@ -104,8 +107,12 @@ export class CoverageStore {
     if (event.hasTargetPosition && event.targetLat !== null && event.targetLon !== null) {
       const targetCheck = validateCoordinate(event.targetLat, event.targetLon);
       if (targetCheck.valid) {
-        distance = haversineDistance(stationLat, stationLon, event.targetLat, event.targetLon);
-        brng = bearing(stationLat, stationLon, event.targetLat, event.targetLon);
+        // Distance and bearing only mean something when we know where the station is.
+        // Measuring from (0,0) would fail the range check below and drop the event.
+        if (stationLocated) {
+          distance = haversineDistance(stationLat, stationLon, event.targetLat, event.targetLon);
+          brng = bearing(stationLat, stationLon, event.targetLat, event.targetLon);
+        }
 
         // Signal validation includes range plausibility
         const sigCheck = validateSignal(
@@ -175,8 +182,9 @@ export class CoverageStore {
       }
     }
 
-    // 6. Update per-station directional coverage
-    this.updateStationCoverage(event, stationLat, stationLon, distance, brng, hasValidTarget);
+    // 6. Update per-station directional coverage.
+    // Without a station location there is no sector or range to record.
+    this.updateStationCoverage(event, stationLat, stationLon, distance, brng, hasValidTarget && stationLocated);
   }
 
   private updateStationCoverage(
@@ -294,25 +302,31 @@ export class CoverageStore {
       ? Array.from({ length: wi + 1 }, (_, i) => i)
       : [];
 
+    const countedInRequested = new Set<number>();
+
     for (const checkWi of windowsToCheck) {
       if (ri === -1) continue;
       const window = this.windows[ri][checkWi];
       const aggregated = window.getAggregated();
       for (const [, cell] of aggregated) {
         for (const stationId of cell.stationIds) {
-          const existing = stationCounts.get(stationId);
-          if (existing) {
-            // Use the max values (longer window should have more data)
-            if (checkWi === wi) {
-              existing.messageCount += cell.messageCount;
-            }
-            existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
-          } else {
-            stationCounts.set(stationId, {
-              messageCount: cell.messageCount,
-              maxDistance: cell.maxDistance,
-            });
+          let existing = stationCounts.get(stationId);
+          if (!existing) {
+            existing = { messageCount: 0, maxDistance: 0 };
+            stationCounts.set(stationId, existing);
           }
+          if (checkWi === wi) {
+            // The requested window is authoritative: replace whatever a shorter
+            // window contributed instead of adding to it (that double counted).
+            if (!countedInRequested.has(stationId)) {
+              countedInRequested.add(stationId);
+              existing.messageCount = 0;
+            }
+            existing.messageCount += cell.messageCount;
+          } else if (!countedInRequested.has(stationId)) {
+            existing.messageCount += cell.messageCount;
+          }
+          existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
         }
       }
     }
