@@ -55,25 +55,30 @@ cd service && docker compose up
 
 ### Map on Cloudflare Pages
 
-The map is fully client-rendered, so it ships to Cloudflare Pages as a static export:
+The map is fully client-rendered, so it ships to Cloudflare Pages as a static export. The Pages
+project is connected to this repository through Cloudflare's Git integration (same as the globe),
+so pushes to `main` publish production and pull requests get preview deployments. No GitHub
+secrets or deploy workflow are involved.
 
-```bash
-cd map
-npm run build:static   # writes map/out
-npx wrangler pages deploy out --project-name=airframes-coverage
-```
+Pages project build settings:
 
-`.github/workflows/deploy-map.yml` does this automatically: pushes to `main` publish production,
-pull requests publish a preview. It needs two repository secrets:
+| Setting | Value |
+|---------|-------|
+| Root directory | `map` |
+| Build command | `npm run build:static` |
+| Build output directory | `out` |
+| Environment variable `NODE_VERSION` | `24` |
+| Environment variable `NEXT_PUBLIC_COVERAGE_API_URL` | `https://staging-coverage.airframes.io` |
+| Environment variable `NEXT_PUBLIC_WS_URL` | `wss://staging-coverage.airframes.io/ws` |
 
-| Secret | Description |
-|--------|-------------|
-| `CLOUDFLARE_API_TOKEN` | API token with **Account → Cloudflare Pages → Edit** |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+The coverage service currently runs only on the staging cluster, where
+`staging-coverage.airframes.io` serves the API under `/api/` and the WebSocket at `/ws`.
+Point these at a production host once one exists.
 
-Optional repository variables: `CLOUDFLARE_PAGES_PROJECT` (default `airframes-coverage`),
-`NEXT_PUBLIC_COVERAGE_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MAP_STYLE_URL`.
-The workflow skips the deploy step (with a warning) until the secrets exist.
+`NEXT_PUBLIC_MAP_STYLE_URL` is optional. Without the API variables the build falls back to
+`http://localhost:3002`, so set them for both Production and Preview.
+
+To build the same output locally: `cd map && npm run build:static` (writes `map/out`).
 
 ### Docker
 
