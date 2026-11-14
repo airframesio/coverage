@@ -12,7 +12,8 @@ async function main() {
   console.log(`Port: ${config.port}`);
   console.log(`NATS: ${config.natsUrl}`);
   console.log(`Main API: ${config.mainApiUrl}`);
-  console.log(`Database: ${config.databaseUrl}`);
+  // Never log the connection string as is: it carries the database password.
+  console.log(`Database: ${config.databaseUrl.replace(/\/\/([^:@/]+):[^@/]*@/, '//$1:***@')}`);
 
   // 1. Initialize coverage store
   const store = new CoverageStore();
