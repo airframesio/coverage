@@ -44,5 +44,15 @@
   },
   "engines": {
     "node": ">=22"
+  },
+  "overrides": {
+    "fflate": "^0.7.5",
+    "image-size": "^2.1.0",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "^11.0.8"
+    },
+    "@ts-morph/common": {
+      "minimatch": "^11.0.8"
+    }
   }
 }
