@@ -6,8 +6,8 @@ export const TIME_WINDOWS = [
   { key: '6h',  label: '6h',      seconds: 21600,   index: 4 },
   { key: '12h', label: '12h',     seconds: 43200,   index: 5 },
   { key: '24h', label: '24h',     seconds: 86400,   index: 6 },
-  { key: '1w',  label: '1 week',  seconds: 604800,  index: 7 },
-  { key: '1M',  label: '1 month', seconds: 2592000, index: 8 },
+  { key: '1w',  label: '1w',      seconds: 604800,  index: 7 },
+  { key: '1M',  label: '1mo',     seconds: 2592000, index: 8 },
 ] as const;
 
 export type TimeWindowKey = typeof TIME_WINDOWS[number]['key'];

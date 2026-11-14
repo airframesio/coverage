@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CoveragePolygon, BearingSector } from '@/lib/types/coverage';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor } from '@/lib/constants/colors';
 import { useUIStore } from '@/lib/stores/ui-store';
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
@@ -41,7 +41,7 @@ export default function PolygonPopup({ polygon, onClose }: Props) {
     return () => { cancelled = true; };
   }, [polygon.stationId, timeWindow]);
 
-  const color = TRANSPORT_COLORS[polygon.sourceType] ?? '#34d399';
+  const color = sourceColor(polygon.sourceType);
   const confidencePct = (polygon.confidence * 100).toFixed(0);
 
   // Compute polygon area approximation from vertex count
@@ -103,7 +103,7 @@ export default function PolygonPopup({ polygon, onClose }: Props) {
         />
         <StatRow
           label="Avg Level"
-          value={detail?.avgLevel != null ? `${detail.avgLevel} dB` : '—'}
+          value={detail?.avgLevel != null ? `${detail.avgLevel.toFixed(1)} dB` : '—'}
         />
         <StatRow
           label="With Position"

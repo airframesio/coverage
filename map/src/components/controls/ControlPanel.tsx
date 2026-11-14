@@ -13,16 +13,14 @@ import MapStyleSwitcher from './MapStyleSwitcher';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
 import TopStations from './TopStations';
+import { buildCoverageGeoJSON } from '@/lib/export-geojson';
 
 export default function ControlPanel() {
   const panelCollapsed = useUIStore((s) => s.panelCollapsed);
   const setPanelCollapsed = useUIStore((s) => s.setPanelCollapsed);
   const refreshing = useCoverageStore((s) => s.refreshing);
   const initialLoading = useCoverageStore((s) => s.initialLoading);
-  const hexData = useCoverageStore((s) => s.hexData);
-  const stations = useCoverageStore((s) => s.stations);
   const setMode = useUIStore((s) => s.setMode);
-  const mode = useUIStore((s) => s.mode);
   const timeWindow = useUIStore((s) => s.timeWindow);
   const setTimeWindow = useUIStore((s) => s.setTimeWindow);
   const selectStation = useUIStore((s) => s.selectStation);
@@ -30,27 +28,22 @@ export default function ControlPanel() {
   const toggleFullscreen = useUIStore((s) => s.toggleFullscreen);
   const pitch3d = useUIStore((s) => s.pitch3d);
   const togglePitch3d = useUIStore((s) => s.togglePitch3d);
+  const helpOpen = useUIStore((s) => s.helpOpen);
+  const toggleHelp = useUIStore((s) => s.toggleHelp);
 
+  // Export what is currently on the map: hex cells or station polygons
+  // (depending on mode) plus the station markers.
   const exportGeoJSON = () => {
-    const features = [
-      // Stations as points
-      ...stations
-        .filter((s) => s.latitude !== 0 || s.longitude !== 0)
-        .map((s) => ({
-          type: 'Feature' as const,
-          geometry: { type: 'Point' as const, coordinates: [s.longitude, s.latitude] },
-          properties: {
-            type: 'station', ident: s.ident, sourceType: s.sourceType,
-            messageCount: s.messageCount, maxDistance: s.maxDistance,
-          },
-        })),
-    ];
-    const geojson = { type: 'FeatureCollection', features };
+    const { hexData, polygonData, stations } = useCoverageStore.getState();
+    const { mode, transportFilter } = useUIStore.getState();
+    const geojson = buildCoverageGeoJSON({
+      mode, timeWindow, transportFilter, hexData, polygonData, stations,
+    });
     const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `airframes-coverage-${timeWindow}.geojson`;
+    a.download = `airframes-coverage-${mode}-${timeWindow}.geojson`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -154,8 +147,8 @@ export default function ControlPanel() {
           />
           <ToolbarButton
             label="?"
-            active={false}
-            onClick={() => { /* handled by KeyboardHelp listener */ }}
+            active={helpOpen}
+            onClick={toggleHelp}
             title="Keyboard shortcuts (?)"
           />
         </div>
@@ -220,6 +213,8 @@ function ToolbarButton({
     <button
       onClick={onClick}
       title={title}
+      aria-label={title}
+      aria-pressed={active}
       className={`px-2 py-1 rounded-md text-[10px] font-mono font-bold transition-all ${
         active
           ? 'bg-emerald-900/50 text-emerald-400 ring-1 ring-emerald-500/30'

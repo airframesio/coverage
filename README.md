@@ -49,4 +49,33 @@ cd service && docker compose up
 |----------|---------|-------------|
 | `NEXT_PUBLIC_COVERAGE_API_URL` | `http://localhost:3002` | Coverage service API |
 | `NEXT_PUBLIC_WS_URL` | `ws://localhost:3002/ws` | Coverage service WebSocket |
-| `NEXT_PUBLIC_MAP_STYLE_URL` | CartoDB Dark Matter | MapLibre tile style URL |
+| `NEXT_PUBLIC_MAP_STYLE_URL` | CartoDB Dark Matter | MapLibre style URL for the default (Dark) basemap |
+
+## Deployment
+
+### Map on Cloudflare Pages
+
+The map is fully client-rendered, so it ships to Cloudflare Pages as a static export:
+
+```bash
+cd map
+npm run build:static   # writes map/out
+npx wrangler pages deploy out --project-name=airframes-coverage
+```
+
+`.github/workflows/deploy-map.yml` does this automatically: pushes to `main` publish production,
+pull requests publish a preview. It needs two repository secrets:
+
+| Secret | Description |
+|--------|-------------|
+| `CLOUDFLARE_API_TOKEN` | API token with **Account → Cloudflare Pages → Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
+
+Optional repository variables: `CLOUDFLARE_PAGES_PROJECT` (default `airframes-coverage`),
+`NEXT_PUBLIC_COVERAGE_API_URL`, `NEXT_PUBLIC_WS_URL`, `NEXT_PUBLIC_MAP_STYLE_URL`.
+The workflow skips the deploy step (with a warning) until the secrets exist.
+
+### Docker
+
+`npm run build` still produces the Next.js standalone server used by `map/Dockerfile`,
+and CI publishes `ghcr.io/airframesio/coverage-map` and `ghcr.io/airframesio/coverage-service` from `main`.

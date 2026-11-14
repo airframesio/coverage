@@ -49,6 +49,47 @@ export function hslToRgba(
   ];
 }
 
+/**
+ * Station/message source type to color. This is the single palette used by
+ * the legend, the station markers, the station list and the activity ticker.
+ */
+export const SOURCE_COLORS: Record<string, string> = {
+  acars: '#34d399',
+  vdl: '#60a5fa',
+  hfdl: '#818cf8',
+  satcom: '#a78bfa',
+  aiscatcher: '#fb923c',
+  ais: '#fb923c',
+};
+
+export const SOURCE_LABELS: Record<string, string> = {
+  acars: 'ACARS',
+  vdl: 'VDL2',
+  hfdl: 'HFDL',
+  satcom: 'SATCOM',
+  aiscatcher: 'AIS',
+  ais: 'AIS',
+};
+
+export const DEFAULT_SOURCE_COLOR = '#a1a1aa';
+
+/** Color for a source type, also accepting transport types (aircraft, marine, ...). */
+export function sourceColor(type: string | null | undefined): string {
+  if (!type) return DEFAULT_SOURCE_COLOR;
+  const key = type.toLowerCase();
+  return SOURCE_COLORS[key] ?? TRANSPORT_COLORS[key] ?? DEFAULT_SOURCE_COLOR;
+}
+
+export function sourceLabel(type: string): string {
+  return SOURCE_LABELS[type.toLowerCase()] ?? type.toUpperCase();
+}
+
+/** '#rrggbb' to [r, g, b] */
+export function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 /** Transport type to color mapping */
 export const TRANSPORT_COLORS: Record<string, string> = {
   aircraft: '#34d399',

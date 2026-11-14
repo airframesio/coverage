@@ -19,7 +19,7 @@ interface CoverageState {
   setRefreshing: (refreshing: boolean) => void;
 }
 
-export const useCoverageStore = create<CoverageState>((set, get) => ({
+export const useCoverageStore = create<CoverageState>((set) => ({
   hexData: [],
   polygonData: [],
   stations: [],

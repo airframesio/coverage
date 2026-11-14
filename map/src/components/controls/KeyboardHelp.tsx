@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
+import { useUIStore } from '@/lib/stores/ui-store';
 
 const SHORTCUTS = [
   { key: 'H', desc: 'Hex grid mode' },
@@ -14,23 +15,32 @@ const SHORTCUTS = [
 ];
 
 export default function KeyboardHelp() {
-  const [show, setShow] = useState(false);
+  const show = useUIStore((s) => s.helpOpen);
+  const setShow = useUIStore((s) => s.setHelpOpen);
+  const toggleHelp = useUIStore((s) => s.toggleHelp);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return;
-      if (e.key === '?') setShow((s) => !s);
-      if (e.key === 'Escape' && show) setShow(false);
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (e.key === '?') toggleHelp();
+      if (e.key === 'Escape') setShow(false);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [show]);
+  }, [setShow, toggleHelp]);
 
   if (!show) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={() => setShow(false)}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Keyboard shortcuts"
+    >
       <div
+        onClick={(e) => e.stopPropagation()}
         className="rounded-2xl border shadow-2xl p-6 w-80"
         style={{
           background: 'var(--panel-bg)',
@@ -42,6 +52,7 @@ export default function KeyboardHelp() {
           <h2 className="text-sm font-semibold text-zinc-100">Keyboard Shortcuts</h2>
           <button
             onClick={() => setShow(false)}
+            aria-label="Close"
             className="text-zinc-500 hover:text-zinc-300 text-lg"
           >
             &times;

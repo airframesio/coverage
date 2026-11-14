@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor } from '@/lib/constants/colors';
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
 
@@ -54,7 +54,7 @@ export default function ActivityTicker() {
 
       <div className="flex flex-wrap gap-x-3 gap-y-1">
         {activity.sources.slice(0, 6).map((s) => {
-          const color = TRANSPORT_COLORS[s.source] ?? '#888';
+          const color = sourceColor(s.source);
           return (
             <div key={s.source} className="flex items-center gap-1.5">
               <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
