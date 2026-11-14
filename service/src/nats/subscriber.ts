@@ -1,11 +1,15 @@
-import { connect, type NatsConnection, type Subscription, StringCodec, credsAuthenticator } from 'nats';
+import {
+  connect,
+  credsAuthenticator,
+  type ConnectionOptions,
+  type NatsConnection,
+  type Subscription,
+} from '@nats-io/transport-node';
 import { config } from '../config.js';
 import { parseAircraftMessage, parseAircraftFlight } from './parsers/aircraft.js';
 import { parseVoyagePosition, parseVoyage, parseAisMessage } from './parsers/marine.js';
 import { parseRawForPosition } from './parsers/raw-decoder.js';
 import type { CoverageEvent, StationMeta } from '../types/events.js';
-
-const sc = StringCodec();
 
 /** All NATS subjects we subscribe to and their parser functions */
 const SUBSCRIPTIONS: Array<{
@@ -68,7 +72,7 @@ export class NatsSubscriber {
   }
 
   async connect(): Promise<void> {
-    const opts: Record<string, any> = {
+    const opts: ConnectionOptions = {
       servers: config.natsUrl,
       name: 'coverage-service',
       maxReconnectAttempts: -1,
@@ -111,7 +115,7 @@ export class NatsSubscriber {
     for await (const msg of sub) {
       this.messagesReceived++;
       try {
-        const payload = JSON.parse(sc.decode(msg.data));
+        const payload = JSON.parse(msg.string());
         const event = parser(payload);
         if (event) {
           this.messagesParsed++;
@@ -127,7 +131,7 @@ export class NatsSubscriber {
   private async processRawSubscription(sub: Subscription): Promise<void> {
     for await (const msg of sub) {
       try {
-        const payload = JSON.parse(sc.decode(msg.data));
+        const payload = JSON.parse(msg.string());
         const event = parseRawForPosition(payload);
         if (event && event.hasTargetPosition) {
           // Resolve station UUID to ID
