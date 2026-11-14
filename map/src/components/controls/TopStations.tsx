@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
 import { useUIStore } from '@/lib/stores/ui-store';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor } from '@/lib/constants/colors';
 
 export default function TopStations() {
   const stations = useCoverageStore((s) => s.stations);
@@ -69,7 +69,7 @@ export default function TopStations() {
       <div className="flex flex-col overflow-y-auto">
         {filtered.map((station) => {
           const isSelected = station.id === selectedStationId;
-          const color = TRANSPORT_COLORS[station.sourceType] ?? '#34d399';
+          const color = sourceColor(station.sourceType);
 
           return (
             <button

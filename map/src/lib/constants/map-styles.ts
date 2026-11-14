@@ -2,7 +2,7 @@ export const MAP_STYLES = [
   {
     id: 'dark-matter',
     label: 'Dark',
-    url: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+    url: process.env.NEXT_PUBLIC_MAP_STYLE_URL || 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
   },
   {
     id: 'dark-nolabels',

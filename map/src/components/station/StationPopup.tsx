@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { Station, BearingSector } from '@/lib/types/coverage';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor } from '@/lib/constants/colors';
 import { useUIStore } from '@/lib/stores/ui-store';
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
@@ -31,7 +31,7 @@ export default function StationPopup({ station, onClose }: Props) {
     return () => { cancelled = true; };
   }, [station.id, timeWindow]);
 
-  const color = TRANSPORT_COLORS[station.sourceType] ?? '#34d399';
+  const color = sourceColor(station.sourceType);
 
   return (
     <div
@@ -66,7 +66,7 @@ export default function StationPopup({ station, onClose }: Props) {
       <div className="grid grid-cols-3 gap-x-3 gap-y-2">
         <StatRow label="Messages" value={station.messageCount.toLocaleString()} />
         <StatRow label="Max Range" value={station.maxDistance > 0 ? `${station.maxDistance.toFixed(0)} km` : '—'} />
-        <StatRow label="Avg Level" value={station.avgLevel !== null ? `${station.avgLevel} dB` : '—'} />
+        <StatRow label="Avg Level" value={station.avgLevel !== null ? `${station.avgLevel.toFixed(1)} dB` : '—'} />
         <StatRow label="With Position" value={(station.messagesWithPosition ?? 0).toLocaleString()} />
         <StatRow label="Confidence" value={station.confidence > 0 ? `${(station.confidence * 100).toFixed(0)}%` : '—'} />
         <StatRow label="Last Seen" value={formatRelativeTime(station.lastSeen)} />
@@ -115,7 +115,7 @@ function PolarChart({ sectors, color }: { sectors: BearingSector[]; color: strin
   const maxDist = Math.max(...sectors.map(s => s.distance), 1);
 
   // Build path for the coverage shape
-  const points = sectors.map((s, i) => {
+  const points = sectors.map((s) => {
     const angle = (s.bearing + 5) * (Math.PI / 180) - Math.PI / 2; // center of 10° sector, rotate so 0° is up
     const r = (s.distance / maxDist) * maxR;
     return {

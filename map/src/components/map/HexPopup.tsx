@@ -1,8 +1,8 @@
 'use client';
 
-import { cellToLatLng, getResolution, cellArea, gridDisk } from 'h3-js';
+import { cellToLatLng, getResolution, cellArea } from 'h3-js';
 import type { CoverageHex } from '@/lib/types/coverage';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor } from '@/lib/constants/colors';
 
 interface Props {
   hex: CoverageHex;
@@ -72,7 +72,7 @@ export default function HexPopup({ hex, onClose }: Props) {
       <div className="grid grid-cols-3 gap-x-3 gap-y-2 mb-3">
         <StatRow label="Messages" value={hex.msgCount.toLocaleString()} />
         <StatRow label="Max Range" value={hex.maxDistance > 0 ? `${hex.maxDistance.toFixed(0)} km` : '—'} />
-        <StatRow label="Avg Level" value={hex.avgLevel !== null ? `${hex.avgLevel} dB` : '—'} />
+        <StatRow label="Avg Level" value={hex.avgLevel !== null ? `${hex.avgLevel.toFixed(1)} dB` : '—'} />
         <StatRow label="Stations" value={String(hex.stationCount)} />
         <StatRow label="Error Rate" value={`${(hex.errorRate * 100).toFixed(1)}%`} />
         <StatRow label="Resolution" value={`H3 res ${resolution}`} />
@@ -87,8 +87,8 @@ export default function HexPopup({ hex, onClose }: Props) {
               key={src}
               className="text-[9px] font-mono font-medium px-1.5 py-0.5 rounded"
               style={{
-                color: TRANSPORT_COLORS[src] ?? '#34d399',
-                background: `${TRANSPORT_COLORS[src] ?? '#34d399'}15`,
+                color: sourceColor(src),
+                background: `${sourceColor(src)}15`,
               }}
             >
               {src}

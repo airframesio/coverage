@@ -30,6 +30,7 @@ interface UIState {
   fullscreen: boolean;
   pitch3d: boolean;
   mapStyleId: MapStyleId;
+  helpOpen: boolean;
 
   setMode: (mode: UIState['mode']) => void;
   setTimeWindow: (tw: TimeWindowKey) => void;
@@ -43,6 +44,8 @@ interface UIState {
   toggleFullscreen: () => void;
   togglePitch3d: () => void;
   setMapStyleId: (id: MapStyleId) => void;
+  setHelpOpen: (open: boolean) => void;
+  toggleHelp: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -65,6 +68,7 @@ export const useUIStore = create<UIState>()(
       fullscreen: false,
       pitch3d: false,
       mapStyleId: 'dark-matter' as MapStyleId,
+      helpOpen: false,
 
       setMode: (mode) => set({ mode }),
       setTimeWindow: (timeWindow) => set({ timeWindow }),
@@ -78,6 +82,8 @@ export const useUIStore = create<UIState>()(
       toggleFullscreen: () => set((s) => ({ fullscreen: !s.fullscreen })),
       togglePitch3d: () => set((s) => ({ pitch3d: !s.pitch3d })),
       setMapStyleId: (mapStyleId) => set({ mapStyleId }),
+      setHelpOpen: (helpOpen) => set({ helpOpen }),
+      toggleHelp: () => set((s) => ({ helpOpen: !s.helpOpen })),
     }),
     {
       name: 'airframes-coverage-ui',

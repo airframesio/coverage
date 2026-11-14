@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Map, NavigationControl, useControl, type MapRef } from 'react-map-gl/maplibre';
-import { MapboxOverlay } from '@deck.gl/mapbox';
+import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox';
+import type { PickingInfo } from '@deck.gl/core';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_CONFIG, zoomToH3Resolution } from '@/lib/constants/map-config';
 import { MAP_STYLES } from '@/lib/constants/map-styles';
@@ -19,7 +20,7 @@ import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
 import { useUrlState } from '@/lib/hooks/use-url-state';
-import type { CoverageHex, CoveragePolygon } from '@/lib/types/coverage';
+import type { CoverageHex, CoveragePolygon, Station } from '@/lib/types/coverage';
 
 const POLL_INTERVAL = 10_000;
 const STATS_INTERVAL = 5_000;
@@ -27,7 +28,7 @@ const ZOOM_DEBOUNCE = 800;
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
 
-function DeckGLOverlay(props: any) {
+function DeckGLOverlay(props: MapboxOverlayProps) {
   const overlay = useControl(() => new MapboxOverlay({ interleaved: true }));
   overlay.setProps(props);
   return null;
@@ -235,43 +236,46 @@ export default function CoverageMap() {
     return result;
   }, [mode, hexData, polygonData, stations, highlightedStationId, selectedPolygonStationId]);
 
-  const getTooltip = useCallback(({ object, layer }: any) => {
+  const getTooltip = useCallback(({ object, layer }: PickingInfo) => {
     if (!object) return null;
 
-    if (layer?.id === 'coverage-hexgrid' && object.h3) {
+    if (layer?.id === 'coverage-hexgrid') {
+      const hex = object as CoverageHex;
       const lines = [
-        `${object.msgCount.toLocaleString()} messages`,
-        `Confidence: ${(object.confidence * 100).toFixed(0)}%`,
-        object.maxDistance > 0 ? `Max range: ${object.maxDistance.toFixed(0)} km` : null,
-        `${object.stationCount} station${object.stationCount !== 1 ? 's' : ''}`,
-        `Sources: ${object.sources.join(', ')}`,
+        `${hex.msgCount.toLocaleString()} messages`,
+        `Confidence: ${(hex.confidence * 100).toFixed(0)}%`,
+        hex.maxDistance > 0 ? `Max range: ${hex.maxDistance.toFixed(0)} km` : null,
+        `${hex.stationCount} station${hex.stationCount !== 1 ? 's' : ''}`,
+        `Sources: ${hex.sources.join(', ')}`,
       ].filter(Boolean);
       return { className: 'deck-tooltip', text: lines.join('\n') };
     }
 
-    if (layer?.id === 'station-markers' && object.ident) {
+    if (layer?.id === 'station-markers') {
+      const station = object as Station;
       const lines = [
-        object.ident,
-        object.sourceType.toUpperCase(),
-        `${object.messageCount.toLocaleString()} messages`,
-        object.maxDistance > 0 ? `Range: ${object.maxDistance.toFixed(0)} km` : null,
+        station.ident || `#${station.id}`,
+        station.sourceType.toUpperCase(),
+        `${station.messageCount.toLocaleString()} messages`,
+        station.maxDistance > 0 ? `Range: ${station.maxDistance.toFixed(0)} km` : null,
       ].filter(Boolean);
       return { className: 'deck-tooltip', text: lines.join('\n') };
     }
 
-    if (layer?.id === 'coverage-polygons' && object.ident) {
+    if (layer?.id === 'coverage-polygons') {
+      const polygon = object as CoveragePolygon;
       return {
         className: 'deck-tooltip',
-        text: `${object.ident}\n${object.messageCount.toLocaleString()} messages\nConfidence: ${(object.confidence * 100).toFixed(0)}%`,
+        text: `${polygon.ident}\n${polygon.messageCount.toLocaleString()} messages\nConfidence: ${(polygon.confidence * 100).toFixed(0)}%`,
       };
     }
 
     return null;
   }, []);
 
-  const onClick = useCallback((info: any) => {
+  const onClick = useCallback((info: PickingInfo) => {
     if (info.layer?.id === 'station-markers' && info.object) {
-      selectStation(info.object.id);
+      selectStation((info.object as Station).id);
       setSelectedHex(null);
       setSelectedPolygon(null);
     } else if (info.layer?.id === 'coverage-hexgrid' && info.object) {
@@ -288,6 +292,17 @@ export default function CoverageMap() {
       setSelectedPolygon(null);
     }
   }, [selectStation]);
+
+  // Escape closes whichever detail popup is open
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setSelectedHex(null);
+      setSelectedPolygon(null);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   const selectedStation = stations.find((s) => s.id === selectedStationId) ?? null;
 

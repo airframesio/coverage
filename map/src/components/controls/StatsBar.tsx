@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
 import { useUIStore } from '@/lib/stores/ui-store';
-import { TRANSPORT_COLORS } from '@/lib/constants/colors';
+import { sourceColor, sourceLabel } from '@/lib/constants/colors';
 
 export default function StatsBar() {
   const stats = useCoverageStore((s) => s.stats);
@@ -36,13 +36,15 @@ export default function StatsBar() {
 
   // Source type breakdown
   const sourceBreakdown = useMemo(() => {
-    const counts: Record<string, number> = {};
+    // Group by display label so aliases (ais / aiscatcher) share one entry
+    const groups = new Map<string, { label: string; color: string; count: number }>();
     for (const s of stations) {
-      counts[s.sourceType] = (counts[s.sourceType] ?? 0) + 1;
+      const label = sourceLabel(s.sourceType);
+      const group = groups.get(label) ?? { label, color: sourceColor(s.sourceType), count: 0 };
+      group.count += 1;
+      groups.set(label, group);
     }
-    return Object.entries(counts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 5);
+    return [...groups.values()].sort((x, y) => y.count - x.count).slice(0, 5);
   }, [stations]);
 
   // Zoom to fit all stations
@@ -66,8 +68,15 @@ export default function StatsBar() {
     });
   };
 
+  // Tick once a second so "updated Ns ago" keeps counting between refreshes.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   const updatedAgo = lastUpdated
-    ? `${Math.round((Date.now() - lastUpdated.getTime()) / 1000)}s ago`
+    ? `${Math.max(0, Math.round((now - lastUpdated.getTime()) / 1000))}s ago`
     : '—';
 
   return (
@@ -90,16 +99,14 @@ export default function StatsBar() {
 
       {/* Source type breakdown */}
       {sourceBreakdown.length > 0 && (
-        <div className="flex items-center gap-2 border-t border-zinc-800/50 pt-2">
-          {sourceBreakdown.map(([type, count]) => {
-            const color = TRANSPORT_COLORS[type] ?? '#888';
-            return (
-              <div key={type} className="flex items-center gap-1">
-                <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
-                <span className="text-[9px] font-mono text-zinc-500">{count}</span>
-              </div>
-            );
-          })}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-zinc-800/50 pt-2">
+          {sourceBreakdown.map(({ label, color, count }) => (
+            <div key={label} className="flex items-center gap-1" title={`${count} ${label} stations`}>
+              <div className="w-1.5 h-1.5 rounded-full" style={{ background: color }} />
+              <span className="text-[9px] font-mono text-zinc-500">{label}</span>
+              <span className="text-[9px] font-mono text-zinc-300 tabular-nums">{count}</span>
+            </div>
+          ))}
         </div>
       )}
 

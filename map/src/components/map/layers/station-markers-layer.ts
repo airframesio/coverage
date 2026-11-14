@@ -1,16 +1,7 @@
 import { ScatterplotLayer } from '@deck.gl/layers';
+import { hexToRgb, sourceColor } from '@/lib/constants/colors';
 import type { Station } from '@/lib/types/coverage';
 
-const SOURCE_COLORS: Record<string, [number, number, number]> = {
-  acars:     [52, 211, 153],
-  vdl:       [96, 165, 250],
-  hfdl:      [129, 140, 248],
-  satcom:    [167, 139, 250],
-  aiscatcher:[251, 146, 60],
-  ais:       [251, 146, 60],
-};
-
-const DEFAULT_COLOR: [number, number, number] = [200, 200, 200];
 const SELECTED_COLOR: [number, number, number, number] = [99, 251, 215, 255];
 
 /**
@@ -35,7 +26,7 @@ export function createStationMarkersLayer(
         : [d.longitude, d.latitude, 0],
     getFillColor: (d) => {
       if (d.id === highlightedId) return SELECTED_COLOR;
-      const rgb = SOURCE_COLORS[d.sourceType] ?? DEFAULT_COLOR;
+      const rgb = hexToRgb(sourceColor(d.sourceType));
       return [rgb[0], rgb[1], rgb[2], 200];
     },
     getRadius: (d) => {

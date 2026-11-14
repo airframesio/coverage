@@ -1,0 +1,40 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /map
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      next:
+        patterns: ["next", "eslint-config-next"]
+      react:
+        patterns: ["react", "react-dom", "@types/react", "@types/react-dom"]
+      deck-gl:
+        patterns: ["@deck.gl/*"]
+      tailwind:
+        patterns: ["tailwindcss", "@tailwindcss/*", "tailwind-merge", "tw-animate-css"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm
+    directory: /service
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directories: ["/map", "/service"]
+    schedule:
+      interval: weekly

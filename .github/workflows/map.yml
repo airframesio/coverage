@@ -3,53 +3,72 @@ name: Map CI
 on:
   push:
     branches: [main]
-    paths: [map/**]
+    paths:
+      - map/**
+      - .github/workflows/map.yml
   pull_request:
     branches: [main]
-    paths: [map/**]
+    paths:
+      - map/**
+      - .github/workflows/map.yml
+
+concurrency:
+  group: map-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 defaults:
   run:
     working-directory: map
 
+env:
+  NEXT_TELEMETRY_DISABLED: 1
+  NEXT_PUBLIC_COVERAGE_API_URL: https://coverage-api.airframes.io
+  NEXT_PUBLIC_WS_URL: wss://coverage-api.airframes.io/ws
+  NEXT_PUBLIC_MAP_STYLE_URL: https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json
+
 jobs:
-  lint:
-    name: Lint
+  check:
+    name: Lint and typecheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: map/.nvmrc
           cache: npm
           cache-dependency-path: map/package-lock.json
       - run: npm ci
       - run: npm run lint
+      - run: npm run typecheck
 
   build:
     name: Build
     runs-on: ubuntu-latest
-    needs: lint
-    env:
-      NEXT_PUBLIC_COVERAGE_API_URL: https://coverage-api.airframes.io
-      NEXT_PUBLIC_WS_URL: wss://coverage-api.airframes.io/ws
-      NEXT_PUBLIC_MAP_STYLE_URL: https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json
+    needs: check
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version-file: map/.nvmrc
           cache: npm
           cache-dependency-path: map/package-lock.json
       - run: npm ci
-      - run: npm run build
+      - name: Build (standalone server, used by Docker)
+        run: npm run build
+      - name: Build (static export, used by Cloudflare Pages)
+        run: npm run build:static
+      - name: Verify static export
+        run: test -f out/index.html
 
   docker:
     name: Docker Build
     runs-on: ubuntu-latest
     needs: build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -67,9 +86,10 @@ jobs:
     needs: docker
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
+      contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
