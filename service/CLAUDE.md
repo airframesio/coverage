@@ -7,6 +7,7 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - `npm run build` - TypeScript compile
 - `npm run start` - Run built JS
 - `npm run typecheck` - Type check only
+- `npm test` - Run unit and API smoke tests (Vitest, in `test/`)
 
 ## Architecture
 - NATS subscriber for all processed message subjects (aircraft, marine, reports, flights)
