@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import type { StationMeta } from '../types/events.js';
+import { toStationId } from '../nats/parsers/station-id.js';
 
 /**
  * Periodically syncs station metadata from the main API.
@@ -84,7 +85,8 @@ export class StationSync {
       let enriched = 0;
 
       for (const s of stations) {
-        if (!s.id) continue;
+        const id = toStationId(s.id);
+        if (id === null) continue;
 
         let lat = parseFloat(s.latitude) || parseFloat(s.fuzzedLatitude) || 0;
         let lon = parseFloat(s.longitude) || parseFloat(s.fuzzedLongitude) || 0;
@@ -99,8 +101,8 @@ export class StationSync {
           }
         }
 
-        this.stationMap.set(s.id, {
-          id: s.id,
+        this.stationMap.set(id, {
+          id,
           uuid: s.uuid ?? '',
           ident: s.ident ?? '',
           latitude: lat,

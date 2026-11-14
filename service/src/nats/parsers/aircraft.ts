@@ -1,4 +1,5 @@
 import type { AircraftMessagePayload, CoverageEvent } from '../../types/events.js';
+import { toStationId } from './station-id.js';
 
 /**
  * Parse an aircraft message NATS event into a CoverageEvent.
@@ -9,7 +10,8 @@ export function parseAircraftMessage(data: AircraftMessagePayload): CoverageEven
   const station = data.station;
   const message = data.message;
 
-  if (!station?.id || !station?.uuid) return null;
+  const stationId = toStationId(station?.id);
+  if (stationId === null || !station?.uuid) return null;
 
   // Try to get target position from message first, then flight
   let targetLat: number | null = null;
@@ -29,7 +31,7 @@ export function parseAircraftMessage(data: AircraftMessagePayload): CoverageEven
   const hasTarget = targetLat !== null && targetLon !== null;
 
   return {
-    stationId: station.id,
+    stationId,
     stationUuid: station.uuid,
     targetLat,
     targetLon,
@@ -55,11 +57,12 @@ export function parseAircraftFlight(data: AircraftMessagePayload): CoverageEvent
   const station = data.station;
   const flight = data.flight;
 
-  if (!station?.id || !station?.uuid) return null;
+  const stationId = toStationId(station?.id);
+  if (stationId === null || !station?.uuid) return null;
   if (!flight?.latitude || !flight?.longitude) return null;
 
   return {
-    stationId: station.id,
+    stationId,
     stationUuid: station.uuid,
     targetLat: flight.latitude,
     targetLon: flight.longitude,

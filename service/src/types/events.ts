@@ -52,7 +52,7 @@ export interface AircraftMessagePayload {
     transmissionType?: string;
   };
   station?: {
-    id?: number;
+    id?: number | string;
     uuid?: string;
     ident?: string;
     latitude?: number;
@@ -63,7 +63,7 @@ export interface AircraftMessagePayload {
     source_type?: string;
   };
   message?: {
-    id?: number;
+    id?: number | string;
     latitude?: number;
     longitude?: number;
     altitude?: number;
@@ -76,18 +76,18 @@ export interface AircraftMessagePayload {
     source_type?: string;
   };
   airframe?: {
-    id?: number;
+    id?: number | string;
     tail?: string;
   };
   flight?: {
-    id?: number;
+    id?: number | string;
     latitude?: number;
     longitude?: number;
     altitude?: number;
     track?: number;
   };
   messageReport?: {
-    id?: number;
+    id?: number | string;
   };
 }
 
@@ -99,7 +99,7 @@ export interface MarineVoyagePositionPayload {
     transmissionType?: string;
   };
   station?: {
-    id?: number;
+    id?: number | string;
     uuid?: string;
     latitude?: number;
     longitude?: number;
@@ -114,12 +114,12 @@ export interface MarineVoyagePositionPayload {
     position_accuracy?: boolean;
   };
   voyage?: {
-    id?: number;
+    id?: number | string;
     last_latitude?: number;
     last_longitude?: number;
   };
   vessel?: {
-    id?: number;
+    id?: number | string;
     mmsi?: string;
     name?: string;
   };
@@ -132,13 +132,13 @@ export interface MarineAisMessagePayload {
     application?: string;
   };
   station?: {
-    id?: number;
+    id?: number | string;
     uuid?: string;
     latitude?: number;
     longitude?: number;
     source_type?: string;
   };
   aisMessage?: {
-    id?: number;
+    id?: number | string;
   };
 }
