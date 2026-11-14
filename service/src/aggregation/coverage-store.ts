@@ -302,32 +302,31 @@ export class CoverageStore {
       ? Array.from({ length: wi + 1 }, (_, i) => i)
       : [];
 
-    const countedInRequested = new Set<number>();
-
     for (const checkWi of windowsToCheck) {
       if (ri === -1) continue;
       const window = this.windows[ri][checkWi];
       const aggregated = window.getAggregated();
+
+      // Sum this window's cells per station on their own. Windows overlap, so
+      // totals from different windows must never be added together.
+      const windowCounts = new Map<number, number>();
       for (const [, cell] of aggregated) {
         for (const stationId of cell.stationIds) {
-          let existing = stationCounts.get(stationId);
-          if (!existing) {
-            existing = { messageCount: 0, maxDistance: 0 };
-            stationCounts.set(stationId, existing);
+          windowCounts.set(stationId, (windowCounts.get(stationId) ?? 0) + cell.messageCount);
+          const existing = stationCounts.get(stationId);
+          if (existing) {
+            existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
+          } else {
+            stationCounts.set(stationId, { messageCount: 0, maxDistance: cell.maxDistance });
           }
-          if (checkWi === wi) {
-            // The requested window is authoritative: replace whatever a shorter
-            // window contributed instead of adding to it (that double counted).
-            if (!countedInRequested.has(stationId)) {
-              countedInRequested.add(stationId);
-              existing.messageCount = 0;
-            }
-            existing.messageCount += cell.messageCount;
-          } else if (!countedInRequested.has(stationId)) {
-            existing.messageCount += cell.messageCount;
-          }
-          existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
         }
+      }
+
+      for (const [stationId, count] of windowCounts) {
+        const existing = stationCounts.get(stationId)!;
+        // The requested window is authoritative. A station seen only in shorter
+        // windows keeps the largest single-window count.
+        existing.messageCount = checkWi === wi ? count : Math.max(existing.messageCount, count);
       }
     }
 
