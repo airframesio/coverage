@@ -1,3 +1,4 @@
+import { toStationId } from './station-id.js';
 import type {
   MarineVoyagePositionPayload,
   MarineAisMessagePayload,
@@ -12,7 +13,8 @@ export function parseVoyagePosition(data: MarineVoyagePositionPayload): Coverage
   const station = data.station;
   const pos = data.voyagePosition;
 
-  if (!station?.id || !station?.uuid) return null;
+  const stationId = toStationId(station?.id);
+  if (stationId === null || !station?.uuid) return null;
 
   let targetLat: number | null = null;
   let targetLon: number | null = null;
@@ -28,7 +30,7 @@ export function parseVoyagePosition(data: MarineVoyagePositionPayload): Coverage
   const hasTarget = targetLat !== null && targetLon !== null;
 
   return {
-    stationId: station.id,
+    stationId,
     stationUuid: station.uuid,
     targetLat,
     targetLon,
@@ -53,14 +55,15 @@ export function parseVoyage(data: MarineVoyagePositionPayload): CoverageEvent | 
   const station = data.station;
   const voyage = data.voyage;
 
-  if (!station?.id || !station?.uuid) return null;
+  const stationId = toStationId(station?.id);
+  if (stationId === null || !station?.uuid) return null;
 
   const targetLat = voyage?.last_latitude ?? null;
   const targetLon = voyage?.last_longitude ?? null;
   const hasTarget = targetLat !== null && targetLon !== null;
 
   return {
-    stationId: station.id,
+    stationId,
     stationUuid: station.uuid,
     targetLat,
     targetLon,
@@ -85,10 +88,11 @@ export function parseVoyage(data: MarineVoyagePositionPayload): CoverageEvent | 
 export function parseAisMessage(data: MarineAisMessagePayload): CoverageEvent | null {
   const station = data.station;
 
-  if (!station?.id || !station?.uuid) return null;
+  const stationId = toStationId(station?.id);
+  if (stationId === null || !station?.uuid) return null;
 
   return {
-    stationId: station.id,
+    stationId,
     stationUuid: station.uuid,
     targetLat: null,
     targetLon: null,
