@@ -17,6 +17,8 @@ export interface CellAggregation {
   maxDistance: number;
   /** Bitmask of interned source type names */
   sources: number;
+  /** The source first recorded for the cell (interned index + 1, 0 when none). Sets the calibration. */
+  primarySource: number;
   /** One station id, or a set once several stations have reported the cell */
   stationIds: number | Set<number>;
   /** Bitmask of transport types */

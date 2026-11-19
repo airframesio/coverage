@@ -20,7 +20,7 @@ export function readPosition(
   const lon = toNumber(entity.longitude);
   if (lat === null || lon === null) return null;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return null;
-  if (Math.abs(lat) < 0.1 && Math.abs(lon) < 0.1) return null;
+  if (lat === 0 && lon === 0) return null;
   return { lat, lon, alt: toNumber(entity.altitude) };
 }
 

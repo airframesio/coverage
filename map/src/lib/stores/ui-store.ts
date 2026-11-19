@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { DEFAULT_TIME_WINDOW } from '../constants/time-windows';
+import { DEFAULT_TIME_WINDOW, TIME_WINDOWS } from '../constants/time-windows';
 import type { TimeWindowKey } from '../constants/time-windows';
 import type { MapStyleId } from '../constants/map-styles';
 
@@ -93,6 +93,15 @@ export const useUIStore = create<UIState>()(
         transportFilter: state.transportFilter,
         mapStyleId: state.mapStyleId,
       }),
+      // A saved window may use a key that no longer exists (the one-month
+      // window was once saved as '1M'). Map it across, or fall back to the default.
+      merge: (persisted, current) => {
+        const saved = (persisted ?? {}) as Partial<UIState>;
+        const savedKey: string | undefined = saved.timeWindow;
+        const key = savedKey === '1M' ? '1mo' : savedKey;
+        const timeWindow = TIME_WINDOWS.find((w) => w.key === key)?.key ?? current.timeWindow;
+        return { ...current, ...saved, timeWindow };
+      },
     }
   )
 );

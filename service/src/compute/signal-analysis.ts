@@ -1,6 +1,6 @@
 import type { CellAggregation } from '../types/coverage.js';
 import { sourceFamily, type SourceFamily } from './source-family.js';
-import { cellSources } from '../aggregation/sliding-window.js';
+import { cellPrimarySource } from '../aggregation/sliding-window.js';
 
 /** Signal level calibration ranges by source family */
 const SIGNAL_CALIBRATION: Record<SourceFamily, { min: number; max: number }> = {
@@ -52,7 +52,7 @@ export function computeConfidence(cell: CellAggregation): number {
   if (cell.messageCount === 0) return 0;
 
   // Calibrate against the first source recorded for the cell
-  const primarySource = cellSources(cell)[0] ?? '';
+  const primarySource = cellPrimarySource(cell);
 
   // 1. Signal strength factor (35%)
   let signalFactor = 0.5; // default if no signal data

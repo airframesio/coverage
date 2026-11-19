@@ -114,6 +114,24 @@ describe('ingest', () => {
     expect(store.rejections).toEqual({ station_blocked: 1, unknown_station: 1 });
   });
 
+  it('calibrates a cell against the source first recorded for it', () => {
+    store = new CoverageStore();
+    store.stationMap.set(11, station(11, 50.03, 8.57));
+    // Another cell sees 'first-elsewhere' before this cell does
+    store.ingest({ ...event(11, 48.0, 2.0), sourceType: 'first-elsewhere' });
+    store.ingest({ ...event(11, 50.9, 9.5), sourceType: 'recorded-first' });
+    store.ingest({ ...event(11, 50.9, 9.5), sourceType: 'first-elsewhere' });
+
+    const cell = store.getH3Data(3, '1h').find(c => c.sources.length === 2)!;
+    expect(cell.sources).toEqual(['recorded-first', 'first-elsewhere']);
+
+    // A restored snapshot keeps that order
+    const restored = new CoverageStore();
+    restored.loadH3Snapshot('1h', 3, [cell]);
+    expect(restored.getH3Data(3, '1h')[0].sources).toEqual(['recorded-first', 'first-elsewhere']);
+    restored.destroy();
+  });
+
   it('reports the same coverage area whatever resolution is loaded', () => {
     store = new CoverageStore();
     store.stationMap.set(9, station(9, 50.03, 8.57));

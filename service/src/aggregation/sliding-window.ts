@@ -36,22 +36,32 @@ export function createEmptyCell(): CellAggregation {
     totalDistance: 0,
     maxDistance: 0,
     sources: 0,
+    primarySource: 0,
     stationIds: 0,
     transportTypes: 0,
   };
 }
 
-/** Source type names recorded in a cell */
+/** Source type names recorded in a cell, the first one recorded first */
 export function cellSources(cell: CellAggregation): string[] {
   const names: string[] = [];
+  const primary = cell.primarySource - 1;
+  if (primary >= 0 && primary < sourceNames.length) names.push(sourceNames[primary]);
   for (let i = 0; i < sourceNames.length; i++) {
-    if (cell.sources & (1 << i)) names.push(sourceNames[i]);
+    if (i !== primary && cell.sources & (1 << i)) names.push(sourceNames[i]);
   }
   return names;
 }
 
+/** The source first recorded for a cell, or '' for an empty cell */
+export function cellPrimarySource(cell: CellAggregation): string {
+  return sourceNames[cell.primarySource - 1] ?? '';
+}
+
 export function addCellSource(cell: CellAggregation, sourceType: string): void {
-  cell.sources |= sourceBit(sourceType);
+  const bit = sourceBit(sourceType);
+  cell.sources |= bit;
+  if (cell.primarySource === 0) cell.primarySource = 32 - Math.clz32(bit);
 }
 
 /** Station ids recorded in a cell */
@@ -171,6 +181,8 @@ export class SlidingWindow {
           existing.totalDistance += cell.totalDistance;
           existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
           existing.sources |= cell.sources;
+          // Slices are read newest first, so an older slice holds the earlier source
+          if (cell.primarySource !== 0) existing.primarySource = cell.primarySource;
           existing.transportTypes |= cell.transportTypes;
           if (typeof cell.stationIds === 'number') {
             if (cell.stationIds !== 0) addCellStation(existing, cell.stationIds);

@@ -52,6 +52,8 @@ describe('aircraft parsers with production payloads', () => {
   it('reads positions defensively', () => {
     expect(readPosition({ latitude: '48.5', longitude: '11.2' })).toEqual({ lat: 48.5, lon: 11.2, alt: null });
     expect(readPosition({ latitude: 0, longitude: 11.2 })).toEqual({ lat: 0, lon: 11.2, alt: null });
+    // Only exact 0/0 means "no position"; a real position near the origin is kept
+    expect(readPosition({ latitude: 0.05, longitude: 0.05 })).toEqual({ lat: 0.05, lon: 0.05, alt: null });
     for (const bad of [null, undefined, {}, { latitude: 91, longitude: 0 }, { latitude: 'x', longitude: 1 }, { latitude: 0, longitude: 0 }]) {
       expect(readPosition(bad as never)).toBeNull();
     }
