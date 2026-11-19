@@ -72,9 +72,10 @@ Pages project build settings:
 | Environment variable `NEXT_PUBLIC_WS_URL` | `wss://coverage-api.airframes.io/ws` |
 
 `coverage-api.airframes.io` is the production coverage service. It serves the API under
-`/api/` and the WebSocket at `/ws`, and is published through the API load balancer in
-`airframesio/stack` (`prod/api/compose.yml`). The staging cluster serves the same paths at
-`staging-coverage.airframes.io`.
+`/api/` and is published through the API load balancer in `airframesio/stack`
+(`prod/api/compose.yml`). The staging cluster serves the same paths at
+`staging-coverage.airframes.io`. The service has no WebSocket endpoint yet (`/ws` returns
+404) and the map does not open one, so `NEXT_PUBLIC_WS_URL` is reserved for later use.
 
 `NEXT_PUBLIC_MAP_STYLE_URL` is optional. Without the API variables the build falls back to
 `http://localhost:3002`, so set them for both Production and Preview.
