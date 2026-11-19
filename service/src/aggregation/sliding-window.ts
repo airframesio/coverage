@@ -1,22 +1,86 @@
 import type { CellAggregation, WindowConfig } from '../types/coverage.js';
 import type { TransportType } from '../types/events.js';
 
+const TRANSPORT_BITS: Record<TransportType, number> = {
+  aircraft: 1,
+  marine: 2,
+  sonde: 4,
+  space: 8,
+};
+const TRANSPORT_NAMES = Object.keys(TRANSPORT_BITS) as TransportType[];
+
+/** Source type names seen so far. A name's position is its bit in a cell's mask. */
+const sourceNames: string[] = [];
+const sourceBits = new Map<string, number>();
+const MAX_SOURCE_BITS = 31;
+const OTHER_SOURCE = 'other';
+
+function sourceBit(sourceType: string): number {
+  let bit = sourceBits.get(sourceType);
+  if (bit === undefined) {
+    // Bitwise operators work on 32 bits. Past 30 distinct names, share the last bit.
+    const index = sourceNames.length < MAX_SOURCE_BITS - 1 ? sourceNames.length : MAX_SOURCE_BITS - 1;
+    if (index === sourceNames.length) sourceNames.push(index === MAX_SOURCE_BITS - 1 ? OTHER_SOURCE : sourceType);
+    bit = 1 << index;
+    sourceBits.set(sourceType, bit);
+  }
+  return bit;
+}
+
 /** Create a fresh empty cell aggregation */
 export function createEmptyCell(): CellAggregation {
   return {
     messageCount: 0,
     totalLevel: 0,
-    minLevel: Infinity,
-    maxLevel: -Infinity,
-    totalError: 0,
     errorMessages: 0,
     totalDistance: 0,
     maxDistance: 0,
-    frequencies: new Map(),
-    sources: new Set(),
-    stationIds: new Set(),
-    transportTypes: new Set(),
+    sources: 0,
+    stationIds: 0,
+    transportTypes: 0,
   };
+}
+
+/** Source type names recorded in a cell */
+export function cellSources(cell: CellAggregation): string[] {
+  const names: string[] = [];
+  for (let i = 0; i < sourceNames.length; i++) {
+    if (cell.sources & (1 << i)) names.push(sourceNames[i]);
+  }
+  return names;
+}
+
+export function addCellSource(cell: CellAggregation, sourceType: string): void {
+  cell.sources |= sourceBit(sourceType);
+}
+
+/** Station ids recorded in a cell */
+export function cellStationIds(cell: CellAggregation): number[] {
+  if (typeof cell.stationIds === 'number') return cell.stationIds === 0 ? [] : [cell.stationIds];
+  return Array.from(cell.stationIds);
+}
+
+export function addCellStation(cell: CellAggregation, stationId: number): void {
+  const current = cell.stationIds;
+  if (typeof current === 'number') {
+    if (current === 0) cell.stationIds = stationId;
+    else if (current !== stationId) cell.stationIds = new Set([current, stationId]);
+  } else {
+    current.add(stationId);
+  }
+}
+
+/** Transport types recorded in a cell */
+export function cellTransportTypes(cell: CellAggregation): TransportType[] {
+  return TRANSPORT_NAMES.filter(name => cell.transportTypes & TRANSPORT_BITS[name]);
+}
+
+export function cellHasTransport(cell: CellAggregation, transportType: TransportType): boolean {
+  return (cell.transportTypes & TRANSPORT_BITS[transportType]) !== 0;
+}
+
+export function addCellTransport(cell: CellAggregation, transportType: TransportType): void {
+  cell.transportTypes |= TRANSPORT_BITS[transportType] ?? 0;
 }
 
 /** Merge a data point into a cell aggregation */
@@ -25,7 +89,6 @@ export function mergeIntoCell(
   distance: number,
   signalLevel: number | null,
   errorCount: number | null,
-  frequency: number | null,
   sourceType: string,
   stationId: number,
   transportType: TransportType,
@@ -34,25 +97,12 @@ export function mergeIntoCell(
   cell.totalDistance += distance;
   if (distance > cell.maxDistance) cell.maxDistance = distance;
 
-  if (signalLevel !== null) {
-    cell.totalLevel += signalLevel;
-    if (signalLevel < cell.minLevel) cell.minLevel = signalLevel;
-    if (signalLevel > cell.maxLevel) cell.maxLevel = signalLevel;
-  }
+  if (signalLevel !== null) cell.totalLevel += signalLevel;
+  if (errorCount !== null && errorCount > 0) cell.errorMessages++;
 
-  if (errorCount !== null && errorCount > 0) {
-    cell.totalError += errorCount;
-    cell.errorMessages++;
-  }
-
-  if (frequency !== null && frequency > 0) {
-    const freqKey = Math.round(frequency * 10) / 10; // round to 0.1 MHz
-    cell.frequencies.set(freqKey, (cell.frequencies.get(freqKey) ?? 0) + 1);
-  }
-
-  cell.sources.add(sourceType);
-  cell.stationIds.add(stationId);
-  cell.transportTypes.add(transportType);
+  addCellSource(cell, sourceType);
+  addCellStation(cell, stationId);
+  addCellTransport(cell, transportType);
 }
 
 /** A single time slice within a sliding window */
@@ -93,13 +143,16 @@ export class SlidingWindow {
   }
 
   /**
-   * Get aggregated view across all slices.
-   * This merges all active slices into a single map.
+   * Get aggregated view across all slices, or only the newest `newestSlices`.
+   * This merges the slices into a single map.
    */
-  getAggregated(): Map<string, CellAggregation> {
+  getAggregated(newestSlices?: number): Map<string, CellAggregation> {
     const result = new Map<string, CellAggregation>();
+    const total = this.config.slices;
+    const count = Math.min(newestSlices ?? total, total);
 
-    for (const slice of this.slices) {
+    for (let n = 0; n < count; n++) {
+      const slice = this.slices[(this.currentIndex - n + total) % total];
       for (const [h3, cell] of slice) {
         if (cell.messageCount === 0) continue;
 
@@ -107,35 +160,23 @@ export class SlidingWindow {
         if (!existing) {
           // Clone the cell
           result.set(h3, {
-            messageCount: cell.messageCount,
-            totalLevel: cell.totalLevel,
-            minLevel: cell.minLevel,
-            maxLevel: cell.maxLevel,
-            totalError: cell.totalError,
-            errorMessages: cell.errorMessages,
-            totalDistance: cell.totalDistance,
-            maxDistance: cell.maxDistance,
-            frequencies: new Map(cell.frequencies),
-            sources: new Set(cell.sources),
-            stationIds: new Set(cell.stationIds),
-            transportTypes: new Set(cell.transportTypes),
+            ...cell,
+            stationIds: typeof cell.stationIds === 'number' ? cell.stationIds : new Set(cell.stationIds),
           });
         } else {
           // Merge into existing
           existing.messageCount += cell.messageCount;
           existing.totalLevel += cell.totalLevel;
-          existing.minLevel = Math.min(existing.minLevel, cell.minLevel);
-          existing.maxLevel = Math.max(existing.maxLevel, cell.maxLevel);
-          existing.totalError += cell.totalError;
           existing.errorMessages += cell.errorMessages;
           existing.totalDistance += cell.totalDistance;
           existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
-          for (const [freq, count] of cell.frequencies) {
-            existing.frequencies.set(freq, (existing.frequencies.get(freq) ?? 0) + count);
+          existing.sources |= cell.sources;
+          existing.transportTypes |= cell.transportTypes;
+          if (typeof cell.stationIds === 'number') {
+            if (cell.stationIds !== 0) addCellStation(existing, cell.stationIds);
+          } else {
+            for (const sid of cell.stationIds) addCellStation(existing, sid);
           }
-          for (const src of cell.sources) existing.sources.add(src);
-          for (const sid of cell.stationIds) existing.stationIds.add(sid);
-          for (const tt of cell.transportTypes) existing.transportTypes.add(tt);
         }
       }
     }
@@ -154,10 +195,20 @@ export class SlidingWindow {
     return total;
   }
 
+  /** Cell records held across all slices (a cell active in several slices counts each time) */
+  storedCells(): number {
+    let total = 0;
+    for (const slice of this.slices) total += slice.size;
+    return total;
+  }
+
   /** Number of unique cells with data */
-  activeCells(): number {
+  activeCells(newestSlices?: number): number {
     const seen = new Set<string>();
-    for (const slice of this.slices) {
+    const total = this.config.slices;
+    const count = Math.min(newestSlices ?? total, total);
+    for (let n = 0; n < count; n++) {
+      const slice = this.slices[(this.currentIndex - n + total) % total];
       for (const h3 of slice.keys()) {
         seen.add(h3);
       }

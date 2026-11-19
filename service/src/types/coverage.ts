@@ -1,19 +1,26 @@
 import type { TransportType } from './events.js';
 
-/** Aggregated data for a single H3 cell within one time-window slice */
+/**
+ * Aggregated data for a single H3 cell within one time-window slice.
+ *
+ * There can be millions of these in memory at once (one per cell, per slice,
+ * per window), so the shape is flat numbers only. Sources and transport types
+ * are bitmasks and the station list stays a plain number until a second
+ * station reports the cell. Read them through the helpers in
+ * aggregation/sliding-window.ts.
+ */
 export interface CellAggregation {
   messageCount: number;
   totalLevel: number;
-  minLevel: number;
-  maxLevel: number;
-  totalError: number;
   errorMessages: number;
   totalDistance: number;
   maxDistance: number;
-  frequencies: Map<number, number>;
-  sources: Set<string>;
-  stationIds: Set<number>;
-  transportTypes: Set<TransportType>;
+  /** Bitmask of interned source type names */
+  sources: number;
+  /** One station id, or a set once several stations have reported the cell */
+  stationIds: number | Set<number>;
+  /** Bitmask of transport types */
+  transportTypes: number;
 }
 
 /** Serialized cell data for API responses */
@@ -82,27 +89,55 @@ export interface WindowConfig {
   windowMs: number;
   sliceMs: number;
   slices: number;
+  /**
+   * For H3 cells only: this window keeps no cells of its own and is read from
+   * the newest `viewSlices` slices of the named window. Sharing slices this way
+   * stores each cell once for a group of windows instead of once per window.
+   */
+  viewOf?: string;
+  viewSlices?: number;
 }
 
 /** Window configurations - oldest (1m) to newest (1mo) */
 export const WINDOW_CONFIGS: WindowConfig[] = [
   { name: '1m',  windowMs: 60_000,           sliceMs: 5_000,        slices: 12 },
   { name: '5m',  windowMs: 5 * 60_000,       sliceMs: 15_000,       slices: 20 },
-  { name: '30m', windowMs: 30 * 60_000,      sliceMs: 60_000,       slices: 30 },
+  { name: '30m', windowMs: 30 * 60_000,      sliceMs: 60_000,       slices: 30, viewOf: '1h',  viewSlices: 15 },
   { name: '1h',  windowMs: 60 * 60_000,      sliceMs: 120_000,      slices: 30 },
-  { name: '6h',  windowMs: 6 * 3_600_000,    sliceMs: 720_000,      slices: 30 },
-  { name: '12h', windowMs: 12 * 3_600_000,   sliceMs: 1_440_000,    slices: 30 },
-  { name: '24h', windowMs: 24 * 3_600_000,   sliceMs: 2_880_000,    slices: 30 },
-  { name: '1w',  windowMs: 7 * 86_400_000,   sliceMs: 14_400_000,   slices: 42 },
+  { name: '6h',  windowMs: 6 * 3_600_000,    sliceMs: 720_000,      slices: 30, viewOf: '24h', viewSlices: 6 },
+  { name: '12h', windowMs: 12 * 3_600_000,   sliceMs: 1_440_000,    slices: 30, viewOf: '24h', viewSlices: 12 },
+  { name: '24h', windowMs: 24 * 3_600_000,   sliceMs: 3_600_000,    slices: 24 },
+  { name: '1w',  windowMs: 7 * 86_400_000,   sliceMs: 14_400_000,   slices: 42, viewOf: '1mo', viewSlices: 7 },
   { name: '1mo', windowMs: 30 * 86_400_000,  sliceMs: 86_400_000,   slices: 30 },
 ];
 
-/** H3 resolution config: which resolutions are maintained for which windows */
+/**
+ * Which H3 resolutions are kept for which windows (index into WINDOW_CONFIGS).
+ *
+ * Every aircraft position lands in its own cell at fine resolutions, and a cell
+ * is stored once per slice per window, so fine grids over long windows cost
+ * memory fast: resolution 7 over an hour is hundreds of thousands of cells at
+ * production volume. Fine resolutions are therefore kept only for short
+ * windows, and windows of similar length share one set of slices (see
+ * WindowConfig.viewOf). A request for a finer grid than a window keeps is answered with the
+ * finest one it has (see finestResolutionFor).
+ */
 export const H3_RESOLUTION_CONFIGS = [
   { resolution: 2, maxWindowIndex: 8 },  // All windows
   { resolution: 3, maxWindowIndex: 8 },  // All windows
-  { resolution: 4, maxWindowIndex: 8 },  // All windows
-  { resolution: 5, maxWindowIndex: 6 },  // Up to 24h
-  { resolution: 6, maxWindowIndex: 4 },  // Up to 6h
-  { resolution: 7, maxWindowIndex: 3 },  // Up to 1h
+  { resolution: 4, maxWindowIndex: 6 },  // Up to 24h
+  { resolution: 5, maxWindowIndex: 3 },  // Up to 1h
+  { resolution: 6, maxWindowIndex: 1 },  // Up to 5m
+  { resolution: 7, maxWindowIndex: 1 },  // Up to 5m
 ] as const;
+
+/** The finest kept resolution for a window that is no finer than the one asked for */
+export function finestResolutionFor(resolution: number, windowIndex: number): number {
+  let best: number = H3_RESOLUTION_CONFIGS[0].resolution;
+  for (const c of H3_RESOLUTION_CONFIGS) {
+    if (c.resolution <= resolution && windowIndex <= c.maxWindowIndex && c.resolution > best) {
+      best = c.resolution;
+    }
+  }
+  return best;
+}

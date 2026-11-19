@@ -1,6 +1,7 @@
 import { getPool } from './database.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
-import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
+import { WINDOW_CONFIGS } from '../types/coverage.js';
+import { shouldMaintainResolution } from '../compute/h3-indexer.js';
 
 // Only persist windows >= 1h (short windows rebuild fast from live traffic)
 const PERSIST_WINDOW_NAMES = ['1h', '6h', '12h', '24h', '1w', '1mo'];
@@ -40,7 +41,11 @@ export class Persistence {
 
     try {
       for (const windowName of PERSIST_WINDOW_NAMES) {
+        const windowIndex = WINDOW_CONFIGS.findIndex(w => w.name === windowName);
         for (const resolution of PERSIST_RESOLUTIONS) {
+          // A view shares its owner's cells, and the owner's snapshot restores them
+          if (WINDOW_CONFIGS[windowIndex]?.viewOf) continue;
+          if (!shouldMaintainResolution(resolution, windowIndex)) continue;
           const cells = this.store.getH3Data(resolution, windowName);
           if (cells.length === 0) continue;
 

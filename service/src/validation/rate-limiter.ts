@@ -6,7 +6,8 @@ interface StationRate {
 }
 
 const WINDOW_MS = 60_000; // 1 minute window
-const MAX_PER_MINUTE = 300; // generous limit per station
+// The busiest production receivers send about 400 messages a minute.
+const MAX_PER_MINUTE = 900;
 
 export class RateLimiter {
   private stations = new Map<number, StationRate>();

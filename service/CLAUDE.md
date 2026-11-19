@@ -13,7 +13,15 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - NATS subscriber for all processed message subjects (aircraft, marine, reports, flights)
 - Server-side validation pipeline (coordinates, signal, range plausibility, station trust)
 - In-memory sliding window aggregation at H3 resolutions 2-7
-- 8 time windows: 5m, 30m, 1h, 6h, 12h, 24h, 1w, 1mo
+- 9 time windows: 1m, 5m, 30m, 1h, 6h, 12h, 24h, 1w, 1mo
+- Memory: fine resolutions are kept only for short windows, and windows of similar
+  length share one set of slices (30m reads from 1h, 6h/12h from 24h, 1w from 1mo).
+  See `WINDOW_CONFIGS` / `H3_RESOLUTION_CONFIGS` in src/types/coverage.ts. A request
+  for a finer grid than a window keeps is answered at the finest one it has.
+- "No position" arrives as latitude 0 / longitude 0 and is treated as missing
+- Stations flagged by the main API are accepted (the flag marks the busiest
+  stations); blocked stations are rejected. `/api/v1/health` reports rejections
+  and discarded positions by reason, and `cellsInMemory`.
 - Hono REST API on port 3002
 - Station metadata synced from main API (authoritative coordinates)
 

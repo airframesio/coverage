@@ -1,42 +1,42 @@
 import type { CellAggregation } from '../types/coverage.js';
+import { sourceFamily, type SourceFamily } from './source-family.js';
+import { cellSources } from '../aggregation/sliding-window.js';
 
-/** Source-specific signal level calibration ranges */
-const SIGNAL_CALIBRATION: Record<string, { min: number; max: number }> = {
-  acarsdec:        { min: -50, max: 0 },
-  vdlm2dec:        { min: -50, max: 0 },
-  dumpvdl2:        { min: -50, max: 0 },
-  dumphfdl:        { min: -30, max: 0 },
-  jaero:           { min: -20, max: 0 },
-  iridium_toolkit: { min: -30, max: 0 },
-  satdump:         { min: -20, max: 0 },
-  aiscatcher:      { min: -50, max: 0 },
+/** Signal level calibration ranges by source family */
+const SIGNAL_CALIBRATION: Record<SourceFamily, { min: number; max: number }> = {
+  acars:   { min: -50, max: 0 },
+  vdl:     { min: -50, max: 0 },
+  hfdl:    { min: -30, max: 0 },
+  satcom:  { min: -30, max: 0 },
+  ais:     { min: -50, max: 0 },
+  unknown: { min: -50, max: 0 },
 };
 
-/** Max plausible reception range by source type (km) */
-export const MAX_RANGE_KM: Record<string, number> = {
-  acarsdec:        600,
-  vdlm2dec:        400,
-  dumpvdl2:        400,
-  dumphfdl:        4000,
-  jaero:           50000,   // satellite - effectively unlimited
-  iridium_toolkit: 50000,
-  satdump:         50000,
-  aiscatcher:      70,
+/** Max plausible distance between receiver and target by source family (km) */
+export const MAX_RANGE_KM: Record<SourceFamily, number> = {
+  acars:   600,
+  vdl:     400,
+  hfdl:    4000,
+  satcom:  50000,   // relayed by satellite - effectively unlimited
+  ais:     70,
+  unknown: 1000,
 };
 
-/** Default max range for unknown sources */
-export const DEFAULT_MAX_RANGE_KM = 1000;
+/** Max plausible range for a source type, in any of its spellings */
+export function maxRangeKm(sourceType: string): number {
+  return MAX_RANGE_KM[sourceFamily(sourceType)];
+}
 
 /** Normalize signal level to 0-1 based on source type */
 export function normalizeSignalLevel(level: number, sourceType: string): number {
-  const cal = SIGNAL_CALIBRATION[sourceType] ?? { min: -50, max: 0 };
+  const cal = SIGNAL_CALIBRATION[sourceFamily(sourceType)];
   const clamped = Math.max(cal.min, Math.min(cal.max, level));
   return (clamped - cal.min) / (cal.max - cal.min);
 }
 
 /** Distance confidence factor */
 function distanceConfidence(distanceKm: number, sourceType: string): number {
-  const maxRange = MAX_RANGE_KM[sourceType] ?? DEFAULT_MAX_RANGE_KM;
+  const maxRange = maxRangeKm(sourceType);
   // Successful reception at greater distance is positive evidence
   // but very close to max range should be discounted slightly
   const ratio = distanceKm / maxRange;
@@ -51,19 +51,8 @@ function distanceConfidence(distanceKm: number, sourceType: string): number {
 export function computeConfidence(cell: CellAggregation): number {
   if (cell.messageCount === 0) return 0;
 
-  // Pick the most common source for calibration
-  let primarySource = '';
-  let maxSourceCount = 0;
-  for (const [src, count] of cell.sources.entries()) {
-    if (typeof count === 'number' && count > maxSourceCount) {
-      primarySource = src;
-      maxSourceCount = count;
-    }
-  }
-  // sources is a Set, so just use the first one
-  if (!primarySource && cell.sources.size > 0) {
-    primarySource = cell.sources.values().next().value!;
-  }
+  // Calibrate against the first source recorded for the cell
+  const primarySource = cellSources(cell)[0] ?? '';
 
   // 1. Signal strength factor (35%)
   let signalFactor = 0.5; // default if no signal data

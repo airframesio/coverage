@@ -1,16 +1,24 @@
-import { SlidingWindow, createEmptyCell, mergeIntoCell } from './sliding-window.js';
+import {
+  SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellStationIds, cellTransportTypes,
+  cellHasTransport, addCellSource, addCellStation, addCellTransport,
+} from './sliding-window.js';
 import { StationSlidingWindow } from './station-window.js';
+import { cellArea } from 'h3-js';
 import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
 import { computeConfidence } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
-import { validateSignal } from '../validation/signal-validator.js';
+import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
 import { RateLimiter } from '../validation/rate-limiter.js';
+import { sourceFamily } from '../compute/source-family.js';
 import { config } from '../config.js';
 import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
 import type { CellAggregation, CellResponse, StationCoverage, WindowConfig } from '../types/coverage.js';
 import type { CoverageEvent, StationMeta, TransportType } from '../types/events.js';
+
+/** Grid used for coverage area figures */
+const AREA_RESOLUTION = 3;
 
 /**
  * Main in-memory coverage data store.
@@ -31,20 +39,23 @@ export class CoverageStore {
   public eventsRejected = 0;
   public eventsWithPosition = 0;
   public eventsWithoutPosition = 0;
+  /** Why events were rejected, by reason. Sums to eventsRejected. */
+  public rejections: Record<string, number> = {};
+  /** Events kept, but whose target position was discarded, by reason */
+  public positionsDiscarded: Record<string, number> = {};
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
-    for (const resConfig of H3_RESOLUTION_CONFIGS) {
-      const resWindows: SlidingWindow[] = [];
-      for (let wi = 0; wi < WINDOW_CONFIGS.length; wi++) {
-        if (shouldMaintainResolution(resConfig.resolution, wi)) {
-          resWindows.push(new SlidingWindow(WINDOW_CONFIGS[wi]));
-        } else {
-          // Placeholder: won't be used but keeps indexing consistent
-          resWindows.push(new SlidingWindow(WINDOW_CONFIGS[wi]));
-        }
-      }
-      this.windows.push(resWindows);
+    // Windows a resolution is not kept for stay empty; they only keep indexing consistent.
+    // A window that is a view of another shares that window's slices.
+    for (let ri = 0; ri < H3_RESOLUTION_CONFIGS.length; ri++) {
+      const own = WINDOW_CONFIGS.map(wc => (wc.viewOf ? null : new SlidingWindow(wc)));
+      this.windows.push(WINDOW_CONFIGS.map((wc, wi) => {
+        const ownerIndex = wc.viewOf ? WINDOW_CONFIGS.findIndex(c => c.name === wc.viewOf) : wi;
+        const owner = own[ownerIndex];
+        if (!owner) throw new Error(`Window ${wc.name} is a view of unknown window ${wc.viewOf}`);
+        return owner;
+      }));
     }
 
     // Initialize station sliding windows (one per time window config)
@@ -61,13 +72,13 @@ export class CoverageStore {
     // 1. Station trust check (uses synced metadata, not NATS payload)
     const trust = checkStationTrust(event, this.stationMap);
     if (!trust.trusted) {
-      this.eventsRejected++;
+      this.reject(trust.reason ?? 'untrusted');
       return;
     }
 
     // 2. Rate limiting
     if (!this.rateLimiter.check(event.stationId)) {
-      this.eventsRejected++;
+      this.reject('rate_limited');
       return;
     }
 
@@ -103,36 +114,50 @@ export class CoverageStore {
     let distance = 0;
     let brng = 0;
     let hasValidTarget = false;
+    let directional = false;
 
     if (event.hasTargetPosition && event.targetLat !== null && event.targetLon !== null) {
       const targetCheck = validateCoordinate(event.targetLat, event.targetLon);
-      if (targetCheck.valid) {
-        // Distance and bearing only mean something when we know where the station is.
-        // Measuring from (0,0) would fail the range check below and drop the event.
-        if (stationLocated) {
-          distance = haversineDistance(stationLat, stationLon, event.targetLat, event.targetLon);
-          brng = bearing(stationLat, stationLon, event.targetLat, event.targetLon);
-        }
-
-        // Signal validation includes range plausibility
+      if (!targetCheck.valid) {
+        this.discardPosition('invalid_coordinate');
+      } else {
         const sigCheck = validateSignal(
           event.sourceType,
           event.frequency,
           event.signalLevel,
           event.errorCount,
-          distance,
         );
         if (!sigCheck.valid) {
-          this.eventsRejected++;
+          this.reject(sigCheck.reason ?? 'signal');
           return;
         }
 
         hasValidTarget = true;
-        this.eventsWithPosition++;
+
+        // Distance and bearing only mean something when we know where the station
+        // is, and when the station hears the target directly. A satellite relay
+        // says nothing about the receiver's own range or direction.
+        directional = stationLocated && sourceFamily(event.sourceType) !== 'satcom';
+        if (directional) {
+          distance = haversineDistance(stationLat, stationLon, event.targetLat, event.targetLon);
+          brng = bearing(stationLat, stationLon, event.targetLat, event.targetLon);
+
+          // A target too far away for this kind of link is a bad or stale
+          // position (flight positions can be old), not a bad reception. Keep
+          // the event as proof the station is receiving and drop the position.
+          if (!isPlausibleRange(event.sourceType, distance)) {
+            this.discardPosition('out_of_range');
+            hasValidTarget = false;
+            directional = false;
+            distance = 0;
+            brng = 0;
+          }
+        }
       }
-    } else {
-      this.eventsWithoutPosition++;
     }
+
+    if (hasValidTarget) this.eventsWithPosition++;
+    else this.eventsWithoutPosition++;
 
     this.eventsProcessed++;
 
@@ -144,7 +169,7 @@ export class CoverageStore {
 
     // Skip if we still have no usable coordinates
     if (indexLat === 0 && indexLon === 0) {
-      this.updateStationCoverage(event, stationLat, stationLon, distance, brng, hasValidTarget);
+      this.updateStationCoverage(event, distance, brng, hasValidTarget, directional);
       return;
     }
 
@@ -157,6 +182,7 @@ export class CoverageStore {
         if (!h3Index) continue;
 
         for (let wi = 0; wi < WINDOW_CONFIGS.length; wi++) {
+          if (WINDOW_CONFIGS[wi].viewOf) continue; // written once, through its owner
           if (!shouldMaintainResolution(resolution, wi)) continue;
 
           const window = this.windows[ri][wi];
@@ -173,7 +199,6 @@ export class CoverageStore {
             distance,
             event.signalLevel,
             event.errorCount,
-            event.frequency,
             event.sourceType,
             event.stationId,
             event.transportType,
@@ -182,20 +207,28 @@ export class CoverageStore {
       }
     }
 
-    // 6. Update per-station directional coverage.
-    // Without a station location there is no sector or range to record.
-    this.updateStationCoverage(event, stationLat, stationLon, distance, brng, hasValidTarget && stationLocated);
+    // 6. Update per-station coverage. Sector and range are recorded only for
+    // directly received targets from a located station.
+    this.updateStationCoverage(event, distance, brng, hasValidTarget, directional);
+  }
+
+  private reject(reason: string): void {
+    this.eventsRejected++;
+    this.rejections[reason] = (this.rejections[reason] ?? 0) + 1;
+  }
+
+  private discardPosition(reason: string): void {
+    this.positionsDiscarded[reason] = (this.positionsDiscarded[reason] ?? 0) + 1;
   }
 
   private updateStationCoverage(
     event: CoverageEvent,
-    _stationLat: number,
-    _stationLon: number,
     distance: number,
     brng: number,
     hasValidTarget: boolean,
+    directional: boolean,
   ): void {
-    const sector = hasValidTarget ? bearingToSector(brng) : -1;
+    const sector = hasValidTarget && directional ? bearingToSector(brng) : -1;
     const hasError = event.errorCount !== null && event.errorCount > 0;
 
     for (const sw of this.stationWindows) {
@@ -228,8 +261,7 @@ export class CoverageStore {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (ri === -1 || wi === -1) return [];
 
-    const window = this.windows[ri][wi];
-    const aggregated = window.getAggregated();
+    const aggregated = this.aggregated(ri, wi);
     const results: CellResponse[] = [];
 
     for (const [h3, cell] of aggregated) {
@@ -237,7 +269,7 @@ export class CoverageStore {
 
       // Transport type filter
       if (opts?.transportType) {
-        if (!cell.transportTypes.has(opts.transportType)) continue;
+        if (!cellHasTransport(cell, opts.transportType)) continue;
       }
 
       const confidence = computeConfidence(cell);
@@ -245,6 +277,7 @@ export class CoverageStore {
       // Min confidence filter
       if (opts?.minConfidence && confidence < opts.minConfidence) continue;
 
+      const stationIds = cellStationIds(cell);
       results.push({
         h3,
         msgCount: cell.messageCount,
@@ -252,10 +285,10 @@ export class CoverageStore {
         maxDistance: Math.round(cell.maxDistance * 10) / 10,
         errorRate: Math.round((cell.errorMessages / cell.messageCount) * 1000) / 1000,
         confidence,
-        sources: Array.from(cell.sources),
-        stationCount: cell.stationIds.size,
-        stationIds: Array.from(cell.stationIds),
-        transportTypes: Array.from(cell.transportTypes),
+        sources: cellSources(cell),
+        stationCount: stationIds.length,
+        stationIds,
+        transportTypes: cellTransportTypes(cell),
       });
     }
 
@@ -304,14 +337,13 @@ export class CoverageStore {
 
     for (const checkWi of windowsToCheck) {
       if (ri === -1) continue;
-      const window = this.windows[ri][checkWi];
-      const aggregated = window.getAggregated();
+      const aggregated = this.aggregated(ri, checkWi);
 
       // Sum this window's cells per station on their own. Windows overlap, so
       // totals from different windows must never be added together.
       const windowCounts = new Map<number, number>();
       for (const [, cell] of aggregated) {
-        for (const stationId of cell.stationIds) {
+        for (const stationId of cellStationIds(cell)) {
           windowCounts.set(stationId, (windowCounts.get(stationId) ?? 0) + cell.messageCount);
           const existing = stationCounts.get(stationId);
           if (existing) {
@@ -348,21 +380,64 @@ export class CoverageStore {
     return stationCounts;
   }
 
+  /**
+   * Area of the cells with coverage in a window, in km².
+   * Always measured on the resolution 3 grid (cells about 110 km across) so
+   * the figure does not depend on which resolution a client happens to load.
+   */
+  getCoverageAreaKm2(windowName: string, transportType?: TransportType): number {
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === AREA_RESOLUTION);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1) return 0;
+
+    let area = 0;
+    for (const [h3, cell] of this.aggregated(ri, wi)) {
+      if (cell.messageCount === 0) continue;
+      if (transportType && !cellHasTransport(cell, transportType)) continue;
+      area += cellArea(h3, 'km2');
+    }
+    return Math.round(area);
+  }
+
+  /** Cells of one resolution merged across a window's slices */
+  private aggregated(ri: number, wi: number): Map<string, CellAggregation> {
+    return this.windows[ri][wi].getAggregated(WINDOW_CONFIGS[wi].viewSlices);
+  }
+
+  /** Events accepted per second, averaged over the last minute */
+  getEventsPerSecond(): number {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === '1m');
+    if (wi === -1) return 0;
+    return Math.round(this.stationWindows[wi].totalMessages() / 60 * 10) / 10;
+  }
+
+  /** Cells held in memory across every window and slice */
+  getCellsInMemory(): number {
+    let total = 0;
+    for (const resWindows of this.windows) {
+      for (const window of new Set(resWindows)) total += window.storedCells();
+    }
+    return total;
+  }
+
   /** Get summary metrics */
   getStats(): {
     eventsProcessed: number;
     eventsRejected: number;
     eventsWithPosition: number;
     eventsWithoutPosition: number;
+    rejections: Record<string, number>;
+    positionsDiscarded: Record<string, number>;
     stationsTracked: number;
     activeCells: Record<number, number>;
   } {
     const activeCells: Record<number, number> = {};
+    const hourIndex = WINDOW_CONFIGS.findIndex(c => c.name === '1h');
     for (let ri = 0; ri < H3_RESOLUTION_CONFIGS.length; ri++) {
-      const res = H3_RESOLUTION_CONFIGS[ri].resolution;
-      // Use the 1h window as representative
-      const wi = WINDOW_CONFIGS.findIndex(c => c.name === '1h');
-      activeCells[res] = this.windows[ri][wi].activeCells();
+      const { resolution, maxWindowIndex } = H3_RESOLUTION_CONFIGS[ri];
+      // The 1h window, or the longest window this resolution is kept for
+      const wi = Math.min(hourIndex, maxWindowIndex);
+      activeCells[resolution] = this.windows[ri][wi].activeCells(WINDOW_CONFIGS[wi].viewSlices);
     }
 
     return {
@@ -370,6 +445,8 @@ export class CoverageStore {
       eventsRejected: this.eventsRejected,
       eventsWithPosition: this.eventsWithPosition,
       eventsWithoutPosition: this.eventsWithoutPosition,
+      rejections: { ...this.rejections },
+      positionsDiscarded: { ...this.positionsDiscarded },
       stationsTracked: this.stationWindows.length > 3 ? this.stationWindows[3].activeStationIds().size : 0,
       activeCells,
     };
@@ -380,6 +457,10 @@ export class CoverageStore {
     const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (ri === -1 || wi === -1) return;
+    // Snapshots saved before a resolution was dropped for this window
+    if (!shouldMaintainResolution(resolution, wi)) return;
+    // A view has no cells of its own; its owner's snapshot covers it.
+    if (WINDOW_CONFIGS[wi].viewOf) return;
 
     const window = this.windows[ri][wi];
     const slice = window.current;
@@ -395,11 +476,11 @@ export class CoverageStore {
         newCell.totalLevel = cell.avgLevel * cell.msgCount;
       }
       newCell.errorMessages = Math.round(cell.errorRate * cell.msgCount);
-      for (const src of cell.sources) newCell.sources.add(src);
+      for (const src of cell.sources) addCellSource(newCell, src);
       if (cell.stationIds) {
-        for (const sid of cell.stationIds) newCell.stationIds.add(sid);
+        for (const sid of cell.stationIds) addCellStation(newCell, sid);
       }
-      for (const tt of cell.transportTypes) newCell.transportTypes.add(tt as TransportType);
+      for (const tt of cell.transportTypes) addCellTransport(newCell, tt as TransportType);
       slice.set(cell.h3, newCell);
     }
   }
@@ -425,6 +506,13 @@ export class CoverageStore {
             sw.record(s.stationId, i, dist, s.sectorAvgLevels?.[i] ?? null, true, false, tt);
           }
         }
+      }
+      // Positions that carry no sector (satellite relays, unlocated stations)
+      let sectorTotal = 0;
+      for (let i = 0; i < 36; i++) sectorTotal += s.sectorMessageCounts?.[i] ?? 0;
+      const unsectored = Math.max(0, (s.messagesWithPosition ?? 0) - sectorTotal);
+      for (let j = 0; j < unsectored; j++) {
+        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, true, false, tt);
       }
       // Record messages without position
       const noPos = (s.totalMessages ?? 0) - (s.messagesWithPosition ?? 0);

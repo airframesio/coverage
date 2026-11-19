@@ -73,15 +73,31 @@ export const SOURCE_LABELS: Record<string, string> = {
 
 export const DEFAULT_SOURCE_COLOR = '#a1a1aa';
 
+/**
+ * Source types arrive in several spellings (`aero-acars`, `jaero-c-acars`,
+ * `iridium-acars`, `dumpvdl2`, ...). Map each onto one palette key so every
+ * spelling of a link shares a color and a label.
+ */
+function sourceKey(type: string): string {
+  const key = type.toLowerCase();
+  if (key in SOURCE_COLORS) return key;
+  if (/^(aero|jaero|inmarsat|satcom|iridium|adsc)/.test(key)) return 'satcom';
+  if (/^(dumpvdl2|vdlm2dec|vdl)/.test(key)) return 'vdl';
+  if (/^(dumphfdl|hfdl)/.test(key)) return 'hfdl';
+  if (/^(acarsdec|acars)/.test(key)) return 'acars';
+  if (/^ais/.test(key)) return 'ais';
+  return key;
+}
+
 /** Color for a source type, also accepting transport types (aircraft, marine, ...). */
 export function sourceColor(type: string | null | undefined): string {
   if (!type) return DEFAULT_SOURCE_COLOR;
-  const key = type.toLowerCase();
+  const key = sourceKey(type);
   return SOURCE_COLORS[key] ?? TRANSPORT_COLORS[key] ?? DEFAULT_SOURCE_COLOR;
 }
 
 export function sourceLabel(type: string): string {
-  return SOURCE_LABELS[type.toLowerCase()] ?? type.toUpperCase();
+  return SOURCE_LABELS[sourceKey(type)] ?? type.toUpperCase();
 }
 
 /** '#rrggbb' to [r, g, b] */

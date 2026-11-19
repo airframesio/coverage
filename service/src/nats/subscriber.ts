@@ -6,7 +6,7 @@ import {
   type Subscription,
 } from '@nats-io/transport-node';
 import { config } from '../config.js';
-import { parseAircraftMessage, parseAircraftFlight } from './parsers/aircraft.js';
+import { parseAircraftMessage, parseAircraftMessageCreated, parseAircraftFlight } from './parsers/aircraft.js';
 import { parseVoyagePosition, parseVoyage, parseAisMessage } from './parsers/marine.js';
 import { parseRawForPosition } from './parsers/raw-decoder.js';
 import type { CoverageEvent, StationMeta } from '../types/events.js';
@@ -17,7 +17,8 @@ const SUBSCRIPTIONS: Array<{
   parser: (data: any) => CoverageEvent | null;
 }> = [
   // Aircraft messages (all sources: acarsdec, dumpvdl2, dumphfdl, jaero, etc.)
-  { subject: 'v1.aircraft.ingest.*.message.*.created', parser: parseAircraftMessage },
+  // A message that also has a station report is counted from its report event below.
+  { subject: 'v1.aircraft.ingest.*.message.*.created', parser: parseAircraftMessageCreated },
   // Aircraft message reports (VDL/HFDL detailed reports)
   { subject: 'v1.aircraft.ingest.*.message.*.report.*.created', parser: parseAircraftMessage },
   // Aircraft flight updates (enriched position data)

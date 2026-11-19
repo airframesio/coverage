@@ -81,8 +81,10 @@ export class StationSlidingWindow {
 
     data.totalMessages++;
 
+    if (hasPosition) data.messagesWithPosition++;
+
+    // sector is -1 when the position says nothing about direction or range
     if (hasPosition && sector >= 0 && sector < 36) {
-      data.messagesWithPosition++;
       if (distance > data.sectorMaxDist[sector]) {
         data.sectorMaxDist[sector] = distance;
       }
@@ -177,6 +179,15 @@ export class StationSlidingWindow {
       }
     }
     return ids;
+  }
+
+  /** Events recorded across all slices of this window */
+  totalMessages(): number {
+    let total = 0;
+    for (const slice of this.slices) {
+      for (const data of slice.values()) total += data.totalMessages;
+    }
+    return total;
   }
 
   destroy(): void {

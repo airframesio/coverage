@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { cellArea } from 'h3-js';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
 import { useUIStore } from '@/lib/stores/ui-store';
 import { sourceColor, sourceLabel } from '@/lib/constants/colors';
@@ -9,30 +10,22 @@ export default function StatsBar() {
   const stats = useCoverageStore((s) => s.stats);
   const stations = useCoverageStore((s) => s.stations);
   const hexData = useCoverageStore((s) => s.hexData);
+  const reportedAreaKm2 = useCoverageStore((s) => s.coverageAreaKm2);
   const lastUpdated = useCoverageStore((s) => s.lastUpdated);
   const timeWindow = useUIStore((s) => s.timeWindow);
-  const viewState = useUIStore((s) => s.viewState);
   const flyTo = useUIStore((s) => s.flyTo);
 
   const totalMessages = stations.reduce((sum, s) => sum + s.messageCount, 0);
 
-  // Estimate coverage area from currently loaded hex cells.
-  // Average area per cell by H3 resolution (km²):
-  // res 2: ~86,745  res 3: ~12,393  res 4: ~1,770  res 5: ~253  res 6: ~36  res 7: ~5
+  // The service measures coverage area on a fixed grid, so the figure does not
+  // change with zoom. An older service does not report it: then add up the real
+  // area of the loaded cells, which overstates at coarse resolutions.
   const coverageAreaKm2 = useMemo(() => {
-    if (hexData.length === 0) return 0;
-    // Detect resolution from first cell index length (res 2=15chars, 3=15, 4=15... all 15)
-    // Instead use the map zoom to infer which resolution was fetched
-    const zoom = viewState.zoom;
-    let areaPerCell: number;
-    if (zoom <= 3) areaPerCell = 86745;
-    else if (zoom <= 5) areaPerCell = 12393;
-    else if (zoom <= 7) areaPerCell = 1770;
-    else if (zoom <= 9) areaPerCell = 253;
-    else if (zoom <= 11) areaPerCell = 36;
-    else areaPerCell = 5;
-    return Math.round(hexData.length * areaPerCell);
-  }, [hexData, viewState.zoom]);
+    if (reportedAreaKm2 !== null) return reportedAreaKm2;
+    let area = 0;
+    for (const hex of hexData) area += cellArea(hex.h3, 'km2');
+    return Math.round(area);
+  }, [reportedAreaKm2, hexData]);
 
   // Source type breakdown
   const sourceBreakdown = useMemo(() => {

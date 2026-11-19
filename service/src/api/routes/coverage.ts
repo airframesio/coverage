@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppContext } from '../server.js';
 import { buildCoveragePolygon } from '../../compute/polygon-builder.js';
-import { WINDOW_CONFIGS } from '../../types/coverage.js';
+import { WINDOW_CONFIGS, finestResolutionFor } from '../../types/coverage.js';
 import type { TransportType } from '../../types/events.js';
 
 export const coverageRoutes = new Hono<AppContext>();
@@ -11,7 +11,7 @@ coverageRoutes.get('/h3', (c) => {
   const store = c.get('store');
 
   const windowName = c.req.query('window') ?? '1h';
-  const resolution = parseInt(c.req.query('resolution') ?? '4', 10);
+  const requestedResolution = parseInt(c.req.query('resolution') ?? '4', 10);
   const transportRaw = c.req.query('transport') ?? 'all';
   const minConfidence = c.req.query('minConfidence') ? parseFloat(c.req.query('minConfidence')!) : undefined;
 
@@ -21,21 +21,26 @@ coverageRoutes.get('/h3', (c) => {
   }
 
   // Validate resolution
-  if (resolution < 2 || resolution > 7) {
-    return c.json({ error: `Invalid resolution: ${resolution}. Must be 2-7.` }, 400);
+  if (!(requestedResolution >= 2 && requestedResolution <= 7)) {
+    return c.json({ error: `Invalid resolution: ${requestedResolution}. Must be 2-7.` }, 400);
   }
 
+  // Long windows keep only coarse grids; answer with the finest one available.
+  const windowIndex = WINDOW_CONFIGS.findIndex(w => w.name === windowName);
+  const resolution = finestResolutionFor(requestedResolution, windowIndex);
+
   const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
-  const cells = store.getH3Data(resolution, windowName, {
-    transportType: validTransports.includes(transportRaw) ? transportRaw as TransportType : undefined,
-    minConfidence,
-  });
+  const transportType = validTransports.includes(transportRaw) ? transportRaw as TransportType : undefined;
+  const cells = store.getH3Data(resolution, windowName, { transportType, minConfidence });
 
   return c.json({
     window: windowName,
     resolution,
+    requestedResolution,
     generatedAt: new Date().toISOString(),
     cellCount: cells.length,
+    // Measured on a fixed grid, so it is the same at every resolution
+    coverageAreaKm2: store.getCoverageAreaKm2(windowName, transportType),
     cells,
   });
 });
