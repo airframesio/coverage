@@ -68,12 +68,14 @@ Pages project build settings:
 | Build command | `npm run build:static` |
 | Build output directory | `out` |
 | Environment variable `NODE_VERSION` | `24` |
-| Environment variable `NEXT_PUBLIC_COVERAGE_API_URL` | `https://staging-coverage.airframes.io` |
-| Environment variable `NEXT_PUBLIC_WS_URL` | `wss://staging-coverage.airframes.io/ws` |
+| Environment variable `NEXT_PUBLIC_COVERAGE_API_URL` | `https://coverage-api.airframes.io` |
+| Environment variable `NEXT_PUBLIC_WS_URL` | `wss://coverage-api.airframes.io/ws` |
 
-The coverage service currently runs only on the staging cluster, where
-`staging-coverage.airframes.io` serves the API under `/api/` and the WebSocket at `/ws`.
-Point these at a production host once one exists.
+`coverage-api.airframes.io` is the production coverage service. It serves the API under
+`/api/` and is published through the API load balancer in `airframesio/stack`
+(`prod/api/compose.yml`). The staging cluster serves the same paths at
+`staging-coverage.airframes.io`. The service has no WebSocket endpoint yet (`/ws` returns
+404) and the map does not open one, so `NEXT_PUBLIC_WS_URL` is reserved for later use.
 
 `NEXT_PUBLIC_MAP_STYLE_URL` is optional. Without the API variables the build falls back to
 `http://localhost:3002`, so set them for both Production and Preview.
