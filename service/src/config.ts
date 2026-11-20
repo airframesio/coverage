@@ -24,6 +24,10 @@ export const config = {
   // Set this to the production API to match stations by ident and backfill coords.
   stationEnrichUrl: process.env.STATION_ENRICH_URL || '',
 
+  // Marine (AIS) coverage. About 600 events a second in production; set
+  // MARINE_COVERAGE_ENABLED=false to leave the marine subjects unsubscribed.
+  marineCoverageEnabled: process.env.MARINE_COVERAGE_ENABLED !== 'false',
+
   // WebSocket push intervals (ms)
   wsCoverageInterval: 5_000,
   wsStationInterval: 30_000,

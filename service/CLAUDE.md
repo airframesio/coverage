@@ -10,7 +10,12 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - `npm test` - Run unit and API smoke tests (Vitest, in `test/`)
 
 ## Architecture
-- NATS subscriber for all processed message subjects (aircraft, marine, reports, flights)
+- NATS subscriber for aircraft message and report subjects, and for marine AIS
+- Marine events carry no `station` object: `ais_message.created` has the station
+  UUID and `voyage-position.created` the vessel position, joined on the voyage id
+  in src/nats/marine-correlator.ts (one reception per AIS message). `/api/v1/health`
+  reports the join under `marine`.
+- Flight events (`v1.aircraft.flight.*`) name no station, so they are not subscribed
 - Server-side validation pipeline (coordinates, signal, range plausibility, station trust)
 - In-memory sliding window aggregation at H3 resolutions 2-7
 - 9 time windows: 1m, 5m, 30m, 1h, 6h, 12h, 24h, 1w, 1mo
@@ -39,3 +44,4 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - MAIN_API_URL - Main Airframes API (for station sync)
 - PORT - HTTP port (default 3002)
 - DATABASE_URL - PostgreSQL connection string
+- MARINE_COVERAGE_ENABLED - set to `false` to leave the marine subjects unsubscribed

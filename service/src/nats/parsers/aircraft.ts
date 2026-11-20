@@ -78,35 +78,3 @@ export function parseAircraftMessageCreated(data: AircraftMessagePayload): Cover
   if (data.station && data.messageReport?.id != null) return null;
   return parseAircraftMessage(data);
 }
-
-/**
- * Parse an aircraft flight update NATS event.
- * Flight updates often have richer position data than messages.
- */
-export function parseAircraftFlight(data: AircraftMessagePayload): CoverageEvent | null {
-  const station = data.station;
-
-  const stationId = toStationId(station?.id);
-  if (stationId === null || !station?.uuid) return null;
-
-  const position = readPosition(data.flight);
-  if (!position) return null;
-
-  return {
-    stationId,
-    stationUuid: station.uuid,
-    targetLat: position.lat,
-    targetLon: position.lon,
-    targetAlt: position.alt,
-    transportType: 'aircraft',
-    sourceType: station.source_type ?? data.source?.name ?? 'unknown',
-    source: data.source?.name ?? 'unknown',
-    frequency: null,
-    signalLevel: null,
-    errorCount: null,
-    timestamp: new Date(),
-    hasTargetPosition: true,
-    _natsStationLat: station.latitude ?? station.fuzzed_latitude,
-    _natsStationLon: station.longitude ?? station.fuzzed_longitude,
-  };
-}
