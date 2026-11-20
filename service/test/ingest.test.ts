@@ -182,4 +182,70 @@ describe('ingest', () => {
     const counts = store.getStationMessageCounts('1h').get(3);
     expect(counts?.maxDistance).toBeGreaterThan(50);
   });
+
+  it('counts each station\'s own messages when stations share a cell', () => {
+    store = new CoverageStore();
+    store.stationMap.set(1, station(1, 50.0, 8.0));
+    store.stationMap.set(2, station(2, 50.1, 8.1));
+
+    // Same target position, so both stations report into the same cells
+    for (let i = 0; i < 30; i++) store.ingest(event(1, 50.3, 8.3));
+    for (let i = 0; i < 5; i++) store.ingest(event(2, 50.3, 8.3));
+    // Messages without a position count too
+    for (let i = 0; i < 4; i++) store.ingest(event(2, null, null));
+
+    for (const window of ['1m', '1h', '1mo']) {
+      const counts = store.getStationMessageCounts(window);
+      expect(counts.get(1)?.messageCount).toBe(30);
+      expect(counts.get(2)?.messageCount).toBe(9);
+    }
+    const total = [...store.getStationMessageCounts('1m').values()].reduce((sum, c) => sum + c.messageCount, 0);
+    expect(total).toBe(store.eventsProcessed);
+    expect(store.getStationMessageCounts('1m').get(1)?.maxDistance).toBeGreaterThan(30);
+  });
+
+  it('keeps every position of an imported area feed, however far away', () => {
+    store = new CoverageStore();
+    // An ordinary AIS receiver and the Norwegian coastal feed, both placed in Oslo
+    store.stationMap.set(30, { ...station(30, 59.9, 10.7), ident: 'AIS-OSLO', sourceType: 'aiscatcher' });
+    store.stationMap.set(31, { ...station(31, 59.9, 10.7), ident: 'NCT', sourceType: 'aiscatcher' });
+    const ais = (stationId: number): CoverageEvent => ({
+      // A vessel off Tromso, about 1,150 km away
+      ...event(stationId, 69.7, 18.9), transportType: 'marine', sourceType: 'ais', source: 'aiscatcher',
+      frequency: null, signalLevel: null,
+    });
+
+    store.ingest(ais(30));
+    expect(store.positionsDiscarded.out_of_range).toBe(1);
+
+    store.ingest(ais(31));
+    expect(store.positionsDiscarded.out_of_range).toBe(1);
+    expect(store.eventsWithPosition).toBe(1);
+    // The feed gets no range of its own from it
+    expect(store.getStationMessageCounts('1h').get(31)).toEqual({ messageCount: 1, maxDistance: 0 });
+  });
+
+  it('does not limit how much a station may send', () => {
+    store = new CoverageStore();
+    store.stationMap.set(20, station(20, 51.95, 4.05));
+
+    for (let i = 0; i < 10_000; i++) store.ingest(event(20, null, null));
+
+    expect(store.eventsRejected).toBe(0);
+    expect(store.eventsProcessed).toBe(10_000);
+  });
+
+  it('reports out-of-range positions by radio family and how far out they were', () => {
+    store = new CoverageStore();
+    store.stationMap.set(22, { ...station(22, 51.95, 4.05), sourceType: 'ais' });
+    const marine = { transportType: 'marine' as const, sourceType: 'ais', frequency: null, signalLevel: null };
+
+    store.ingest({ ...event(22, 51.95, 5.5), ...marine });  // about 100 km: accepted
+    store.ingest({ ...event(22, 51.95, 6.6), ...marine });  // about 175 km: just outside
+    store.ingest({ ...event(22, 40.0, -70.0), ...marine }); // across the Atlantic
+
+    expect(store.eventsWithPosition).toBe(1);
+    expect(store.positionsDiscarded).toEqual({ out_of_range: 2 });
+    expect(store.outOfRange).toEqual({ ais: { near: 1, far: 1 } });
+  });
 });

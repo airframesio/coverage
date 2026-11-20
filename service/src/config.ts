@@ -28,6 +28,16 @@ export const config = {
   // MARINE_COVERAGE_ENABLED=false to leave the marine subjects unsubscribed.
   marineCoverageEnabled: process.env.MARINE_COVERAGE_ENABLED !== 'false',
 
+  // Stations that are not one receiver but a relayed area feed, such as a
+  // coastal administration's national AIS network (NCT is the Norwegian one).
+  // Their vessels can be any distance from the station's nominal location, so
+  // positions are kept without a range limit and give the station no range or
+  // direction of its own. Comma-separated station idents, case-insensitive.
+  areaFeedStations: new Set(
+    (process.env.AREA_FEED_STATIONS ?? 'NCT')
+      .split(',').map(s => s.trim().toLowerCase()).filter(Boolean),
+  ),
+
   // WebSocket push intervals (ms)
   wsCoverageInterval: 5_000,
   wsStationInterval: 30_000,
