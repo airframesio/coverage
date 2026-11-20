@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { CoverageStore } from '../src/aggregation/coverage-store.js';
-import { parseAircraftMessage, parseAircraftMessageCreated, parseAircraftFlight, readPosition } from '../src/nats/parsers/aircraft.js';
+import { parseAircraftMessage, parseAircraftMessageCreated, readPosition } from '../src/nats/parsers/aircraft.js';
 import { toStationId } from '../src/nats/parsers/station-id.js';
 import type { StationMeta } from '../src/types/events.js';
 
@@ -28,7 +28,6 @@ describe('aircraft parsers with production payloads', () => {
 
   it('normalizes a string station id to a number', () => {
     expect(parseAircraftMessage(payload)?.stationId).toBe(1234);
-    expect(parseAircraftFlight(payload)?.stationId).toBe(1234);
   });
 
   it('drops events with no usable station id', () => {
@@ -46,7 +45,6 @@ describe('aircraft parsers with production payloads', () => {
     const none = parseAircraftMessage({ ...zeroed, flight: { id: '555', latitude: 0, longitude: 0 } })!;
     expect(none.hasTargetPosition).toBe(false);
     expect(none.targetLat).toBeNull();
-    expect(parseAircraftFlight({ ...zeroed, flight: { id: '555', latitude: 0, longitude: 0 } })).toBeNull();
   });
 
   it('reads positions defensively', () => {

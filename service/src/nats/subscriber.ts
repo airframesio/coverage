@@ -6,8 +6,8 @@ import {
   type Subscription,
 } from '@nats-io/transport-node';
 import { config } from '../config.js';
-import { parseAircraftMessage, parseAircraftMessageCreated, parseAircraftFlight } from './parsers/aircraft.js';
-import { parseVoyagePosition, parseVoyage, parseAisMessage } from './parsers/marine.js';
+import { parseAircraftMessage, parseAircraftMessageCreated } from './parsers/aircraft.js';
+import { MarineCorrelator, type MarineReception } from './marine-correlator.js';
 import { parseRawForPosition } from './parsers/raw-decoder.js';
 import type { CoverageEvent, StationMeta } from '../types/events.js';
 
@@ -21,17 +21,15 @@ const SUBSCRIPTIONS: Array<{
   { subject: 'v1.aircraft.ingest.*.message.*.created', parser: parseAircraftMessageCreated },
   // Aircraft message reports (VDL/HFDL detailed reports)
   { subject: 'v1.aircraft.ingest.*.message.*.report.*.created', parser: parseAircraftMessage },
-  // Aircraft flight updates (enriched position data)
-  { subject: 'v1.aircraft.ingest.*.flight.*.updated', parser: parseAircraftFlight },
-  { subject: 'v1.aircraft.ingest.*.flight.*.created', parser: parseAircraftFlight },
-  // Marine voyage positions (AIS position reports)
-  { subject: 'v1.marine.voyage-position.created', parser: parseVoyagePosition },
-  // Marine voyage updates
-  { subject: 'v1.marine.voyage.created', parser: parseVoyage },
-  { subject: 'v1.marine.voyage.updated', parser: parseVoyage },
-  // Marine AIS messages (proves reception even without position)
-  { subject: 'v1.marine.ais_message.created', parser: parseAisMessage },
 ];
+
+/**
+ * Marine subjects. They carry no `station` object, so the station (on the AIS
+ * message) and the vessel position (on the voyage position) are joined by the
+ * MarineCorrelator instead of being parsed one event at a time.
+ */
+const MARINE_AIS_MESSAGE_SUBJECT = 'v1.marine.ais_message.created';
+const MARINE_VOYAGE_POSITION_SUBJECT = 'v1.marine.voyage-position.created';
 
 /** Raw subjects for extracting positions from decoder output */
 const RAW_SUBSCRIPTIONS = [
@@ -54,6 +52,10 @@ export class NatsSubscriber {
   public messagesParsed = 0;
   public parseErrors = 0;
   public rawPositionsFound = 0;
+  public marineUnknownStation = 0;
+
+  readonly marine = new MarineCorrelator((reception) => this.onMarineReception(reception));
+  private marineTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     onEvent: (event: CoverageEvent) => void,
@@ -106,7 +108,56 @@ export class NatsSubscriber {
 
     this.refreshUuidIndex();
 
-    console.log(`[NATS] Subscribed to ${SUBSCRIPTIONS.length} processed + ${RAW_SUBSCRIPTIONS.length} raw subject patterns`);
+    if (config.marineCoverageEnabled) {
+      const aisSub = this.nc.subscribe(MARINE_AIS_MESSAGE_SUBJECT);
+      const positionSub = this.nc.subscribe(MARINE_VOYAGE_POSITION_SUBJECT);
+      this.subscriptions.push(aisSub, positionSub);
+      this.processMarineSubscription(aisSub, (payload) => this.marine.onAisMessage(payload));
+      this.processMarineSubscription(positionSub, (payload) => this.marine.onVoyagePosition(payload));
+      this.marineTimer = setInterval(() => this.marine.flush(), 1000);
+    }
+
+    console.log(
+      `[NATS] Subscribed to ${SUBSCRIPTIONS.length} processed + ${RAW_SUBSCRIPTIONS.length} raw subject patterns` +
+      (config.marineCoverageEnabled ? ' + 2 marine subjects' : ' (marine coverage disabled)'),
+    );
+  }
+
+  private async processMarineSubscription(sub: Subscription, handle: (payload: any) => void): Promise<void> {
+    for await (const msg of sub) {
+      this.messagesReceived++;
+      try {
+        handle(JSON.parse(msg.string()));
+      } catch {
+        this.parseErrors++;
+      }
+    }
+  }
+
+  /** One AIS message received by a station, with the vessel position when known */
+  private onMarineReception(reception: MarineReception): void {
+    const stationId = this.uuidToId.get(reception.stationUuid);
+    if (!stationId) {
+      this.marineUnknownStation++;
+      return;
+    }
+    const hasTarget = reception.lat !== null && reception.lon !== null;
+    this.messagesParsed++;
+    this.onEvent({
+      stationId,
+      stationUuid: reception.stationUuid,
+      targetLat: reception.lat,
+      targetLon: reception.lon,
+      targetAlt: null,
+      transportType: 'marine',
+      sourceType: 'ais',
+      source: reception.source,
+      frequency: null, // AIS is always on 161.975 / 162.025 MHz
+      signalLevel: null,
+      errorCount: null,
+      timestamp: new Date(),
+      hasTargetPosition: hasTarget,
+    });
   }
 
   private async processSubscription(
@@ -155,6 +206,10 @@ export class NatsSubscriber {
   }
 
   async disconnect(): Promise<void> {
+    if (this.marineTimer) {
+      clearInterval(this.marineTimer);
+      this.marineTimer = null;
+    }
     for (const sub of this.subscriptions) {
       sub.unsubscribe();
     }

@@ -22,6 +22,14 @@ healthRoutes.get('/health', (c) => {
       parsed: nats.messagesParsed,
       parseErrors: nats.parseErrors,
     },
+    marine: {
+      paired: nats.marine.paired,
+      fromLastPosition: nats.marine.fromLastPosition,
+      withoutPosition: nats.marine.withoutPosition,
+      unknownStation: nats.marineUnknownStation,
+      pending: nats.marine.pendingSize,
+      trackedVoyages: nats.marine.trackedVoyages,
+    },
     coverage: {
       eventsProcessed: stats.eventsProcessed,
       eventsRejected: stats.eventsRejected,
