@@ -183,19 +183,14 @@ describe('ingest', () => {
     expect(counts?.maxDistance).toBeGreaterThan(50);
   });
 
-  it('lets a marine station send more per minute than an aircraft station', () => {
+  it('does not limit how much a station may send', () => {
     store = new CoverageStore();
     store.stationMap.set(20, station(20, 51.95, 4.05));
-    store.stationMap.set(21, { ...station(21, 51.95, 4.05), sourceType: 'ais' });
 
-    for (let i = 0; i < 1000; i++) {
-      store.ingest(event(20, null, null));
-      store.ingest({ ...event(21, null, null), transportType: 'marine', sourceType: 'ais', frequency: null, signalLevel: null });
-    }
+    for (let i = 0; i < 10_000; i++) store.ingest(event(20, null, null));
 
-    // 900 a minute for aircraft, 6000 for marine
-    expect(store.rejections).toEqual({ rate_limited: 100 });
-    expect(store.rateLimitedByTransport).toEqual({ aircraft: 100 });
+    expect(store.eventsRejected).toBe(0);
+    expect(store.eventsProcessed).toBe(10_000);
   });
 
   it('reports out-of-range positions by radio family and how far out they were', () => {

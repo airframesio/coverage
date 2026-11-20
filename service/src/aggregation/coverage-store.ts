@@ -10,7 +10,6 @@ import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
-import { RateLimiter, MAX_PER_MINUTE, MAX_PER_MINUTE_MARINE } from '../validation/rate-limiter.js';
 import { sourceFamily } from '../compute/source-family.js';
 import { config } from '../config.js';
 import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
@@ -32,7 +31,6 @@ export class CoverageStore {
   /** Synced station metadata from main API */
   public stationMap = new Map<number, StationMeta>();
   /** Rate limiter */
-  private rateLimiter = new RateLimiter();
 
   // Metrics
   public eventsProcessed = 0;
@@ -43,8 +41,6 @@ export class CoverageStore {
   public rejections: Record<string, number> = {};
   /** Events kept, but whose target position was discarded, by reason */
   public positionsDiscarded: Record<string, number> = {};
-  /** Rate-limited events by transport type */
-  public rateLimitedByTransport: Record<string, number> = {};
   /**
    * Out-of-range positions by radio family: how many were within twice the
    * limit (the limit may be too tight) and how many beyond it (a stale target
@@ -84,13 +80,8 @@ export class CoverageStore {
       return;
     }
 
-    // 2. Rate limiting
-    const maxPerMinute = event.transportType === 'marine' ? MAX_PER_MINUTE_MARINE : MAX_PER_MINUTE;
-    if (!this.rateLimiter.check(event.stationId, maxPerMinute)) {
-      this.reject('rate_limited');
-      this.rateLimitedByTransport[event.transportType] = (this.rateLimitedByTransport[event.transportType] ?? 0) + 1;
-      return;
-    }
+    // There is deliberately no per-station rate limit: a receiver near a busy
+    // port or airport is legitimately far busier than the rest.
 
     // 3. Determine station coordinates
     // Prefer authoritative (synced from main API), fall back to NATS payload
@@ -446,7 +437,6 @@ export class CoverageStore {
     eventsWithoutPosition: number;
     rejections: Record<string, number>;
     positionsDiscarded: Record<string, number>;
-    rateLimitedByTransport: Record<string, number>;
     outOfRange: Record<string, { near: number; far: number }>;
     stationsTracked: number;
     activeCells: Record<number, number>;
@@ -467,7 +457,6 @@ export class CoverageStore {
       eventsWithoutPosition: this.eventsWithoutPosition,
       rejections: { ...this.rejections },
       positionsDiscarded: { ...this.positionsDiscarded },
-      rateLimitedByTransport: { ...this.rateLimitedByTransport },
       outOfRange: structuredClone(this.outOfRange),
       stationsTracked: this.stationWindows.length > 3 ? this.stationWindows[3].activeStationIds().size : 0,
       activeCells,
@@ -551,6 +540,5 @@ export class CoverageStore {
       }
     }
     for (const sw of this.stationWindows) sw.destroy();
-    this.rateLimiter.destroy();
   }
 }
