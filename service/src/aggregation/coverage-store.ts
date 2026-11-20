@@ -6,11 +6,11 @@ import { StationSlidingWindow } from './station-window.js';
 import { cellArea } from 'h3-js';
 import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
-import { computeConfidence } from '../compute/signal-analysis.js';
+import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
-import { RateLimiter } from '../validation/rate-limiter.js';
+import { RateLimiter, MAX_PER_MINUTE, MAX_PER_MINUTE_MARINE } from '../validation/rate-limiter.js';
 import { sourceFamily } from '../compute/source-family.js';
 import { config } from '../config.js';
 import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
@@ -43,6 +43,14 @@ export class CoverageStore {
   public rejections: Record<string, number> = {};
   /** Events kept, but whose target position was discarded, by reason */
   public positionsDiscarded: Record<string, number> = {};
+  /** Rate-limited events by transport type */
+  public rateLimitedByTransport: Record<string, number> = {};
+  /**
+   * Out-of-range positions by radio family: how many were within twice the
+   * limit (the limit may be too tight) and how many beyond it (a stale target
+   * position or a wrongly located station).
+   */
+  public outOfRange: Record<string, { near: number; far: number }> = {};
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
@@ -77,8 +85,10 @@ export class CoverageStore {
     }
 
     // 2. Rate limiting
-    if (!this.rateLimiter.check(event.stationId)) {
+    const maxPerMinute = event.transportType === 'marine' ? MAX_PER_MINUTE_MARINE : MAX_PER_MINUTE;
+    if (!this.rateLimiter.check(event.stationId, maxPerMinute)) {
       this.reject('rate_limited');
+      this.rateLimitedByTransport[event.transportType] = (this.rateLimitedByTransport[event.transportType] ?? 0) + 1;
       return;
     }
 
@@ -147,6 +157,7 @@ export class CoverageStore {
           // the event as proof the station is receiving and drop the position.
           if (!isPlausibleRange(event.sourceType, distance)) {
             this.discardPosition('out_of_range');
+            this.countOutOfRange(event.sourceType, distance);
             hasValidTarget = false;
             directional = false;
             distance = 0;
@@ -219,6 +230,13 @@ export class CoverageStore {
 
   private discardPosition(reason: string): void {
     this.positionsDiscarded[reason] = (this.positionsDiscarded[reason] ?? 0) + 1;
+  }
+
+  private countOutOfRange(sourceType: string, distanceKm: number): void {
+    const family = sourceFamily(sourceType);
+    const entry = (this.outOfRange[family] ??= { near: 0, far: 0 });
+    if (distanceKm <= maxRangeKm(sourceType) * 2) entry.near++;
+    else entry.far++;
   }
 
   private updateStationCoverage(
@@ -428,6 +446,8 @@ export class CoverageStore {
     eventsWithoutPosition: number;
     rejections: Record<string, number>;
     positionsDiscarded: Record<string, number>;
+    rateLimitedByTransport: Record<string, number>;
+    outOfRange: Record<string, { near: number; far: number }>;
     stationsTracked: number;
     activeCells: Record<number, number>;
   } {
@@ -447,6 +467,8 @@ export class CoverageStore {
       eventsWithoutPosition: this.eventsWithoutPosition,
       rejections: { ...this.rejections },
       positionsDiscarded: { ...this.positionsDiscarded },
+      rateLimitedByTransport: { ...this.rateLimitedByTransport },
+      outOfRange: structuredClone(this.outOfRange),
       stationsTracked: this.stationWindows.length > 3 ? this.stationWindows[3].activeStationIds().size : 0,
       activeCells,
     };

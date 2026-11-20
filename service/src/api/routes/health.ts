@@ -37,6 +37,8 @@ healthRoutes.get('/health', (c) => {
       eventsWithoutPosition: stats.eventsWithoutPosition,
       rejections: stats.rejections,
       positionsDiscarded: stats.positionsDiscarded,
+      rateLimitedByTransport: stats.rateLimitedByTransport,
+      outOfRange: stats.outOfRange,
       stationsTracked: stats.stationsTracked,
       activeCells: stats.activeCells,
       cellsInMemory: store.getCellsInMemory(),

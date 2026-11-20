@@ -182,4 +182,33 @@ describe('ingest', () => {
     const counts = store.getStationMessageCounts('1h').get(3);
     expect(counts?.maxDistance).toBeGreaterThan(50);
   });
+
+  it('lets a marine station send more per minute than an aircraft station', () => {
+    store = new CoverageStore();
+    store.stationMap.set(20, station(20, 51.95, 4.05));
+    store.stationMap.set(21, { ...station(21, 51.95, 4.05), sourceType: 'ais' });
+
+    for (let i = 0; i < 1000; i++) {
+      store.ingest(event(20, null, null));
+      store.ingest({ ...event(21, null, null), transportType: 'marine', sourceType: 'ais', frequency: null, signalLevel: null });
+    }
+
+    // 900 a minute for aircraft, 6000 for marine
+    expect(store.rejections).toEqual({ rate_limited: 100 });
+    expect(store.rateLimitedByTransport).toEqual({ aircraft: 100 });
+  });
+
+  it('reports out-of-range positions by radio family and how far out they were', () => {
+    store = new CoverageStore();
+    store.stationMap.set(22, { ...station(22, 51.95, 4.05), sourceType: 'ais' });
+    const marine = { transportType: 'marine' as const, sourceType: 'ais', frequency: null, signalLevel: null };
+
+    store.ingest({ ...event(22, 51.95, 5.5), ...marine });  // about 100 km: accepted
+    store.ingest({ ...event(22, 51.95, 6.6), ...marine });  // about 175 km: just outside
+    store.ingest({ ...event(22, 40.0, -70.0), ...marine }); // across the Atlantic
+
+    expect(store.eventsWithPosition).toBe(1);
+    expect(store.positionsDiscarded).toEqual({ out_of_range: 2 });
+    expect(store.outOfRange).toEqual({ ais: { near: 1, far: 1 } });
+  });
 });

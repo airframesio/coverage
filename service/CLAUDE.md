@@ -27,6 +27,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - Stations flagged by the main API are accepted (the flag marks the busiest
   stations); blocked stations are rejected. `/api/v1/health` reports rejections
   and discarded positions by reason, and `cellsInMemory`.
+- Per-station rate limit: 900 events a minute, 6000 for marine. `/api/v1/health`
+  reports `rateLimitedByTransport` and `outOfRange` by radio family (`near` = within
+  twice the range limit, `far` = beyond it)
 - Hono REST API on port 3002
 - Station metadata synced from main API (authoritative coordinates)
 
