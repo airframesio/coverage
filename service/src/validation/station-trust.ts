@@ -1,9 +1,15 @@
 import { config } from '../config.js';
 import type { StationMeta, CoverageEvent } from '../types/events.js';
 
+export type TrustRejection =
+  | 'unknown_station'
+  | 'station_blocked'
+  | 'station_status'
+  | 'low_trust';
+
 export interface TrustResult {
   trusted: boolean;
-  reason?: string;
+  reason?: TrustRejection;
   /** Station coordinates from our synced metadata (authoritative) */
   stationLat: number;
   stationLon: number;
@@ -24,23 +30,25 @@ export function checkStationTrust(
   const station = stationMap.get(event.stationId);
 
   if (!station) {
-    return { trusted: false, reason: 'unknown station', stationLat: 0, stationLon: 0 };
+    return { trusted: false, reason: 'unknown_station', stationLat: 0, stationLon: 0 };
   }
 
   if (station.blocked) {
-    return { trusted: false, reason: 'station blocked', stationLat: station.latitude, stationLon: station.longitude };
+    return { trusted: false, reason: 'station_blocked', stationLat: station.latitude, stationLon: station.longitude };
   }
 
-  if (station.flagged) {
-    return { trusted: false, reason: 'station flagged', stationLat: station.latitude, stationLon: station.longitude };
-  }
+  // `flagged` is deliberately not a reason to distrust a station. The main API
+  // sets it for "Rate anomaly detected", which in practice marks the busiest
+  // healthy receivers: in November 2026 that was 322 stations carrying close to
+  // 80% of all aircraft events, including most Inmarsat stations. `blocked` is
+  // the switch for keeping a station out of coverage.
 
   if (station.status === 'inactive' || station.status === 'secret') {
-    return { trusted: false, reason: `station status: ${station.status}`, stationLat: station.latitude, stationLon: station.longitude };
+    return { trusted: false, reason: 'station_status', stationLat: station.latitude, stationLon: station.longitude };
   }
 
   if (station.trustScore < 0.1) {
-    return { trusted: false, reason: `low trust score: ${station.trustScore}`, stationLat: station.latitude, stationLon: station.longitude };
+    return { trusted: false, reason: 'low_trust', stationLat: station.latitude, stationLon: station.longitude };
   }
 
   // Station coordinates may be 0/null if GeoIP hasn't run — that's OK,

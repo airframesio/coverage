@@ -27,8 +27,11 @@ healthRoutes.get('/health', (c) => {
       eventsRejected: stats.eventsRejected,
       eventsWithPosition: stats.eventsWithPosition,
       eventsWithoutPosition: stats.eventsWithoutPosition,
+      rejections: stats.rejections,
+      positionsDiscarded: stats.positionsDiscarded,
       stationsTracked: stats.stationsTracked,
       activeCells: stats.activeCells,
+      cellsInMemory: store.getCellsInMemory(),
     },
   });
 });
@@ -39,13 +42,10 @@ healthRoutes.get('/stats', (c) => {
   const nats = c.get('nats');
   const stats = store.getStats();
 
-  // Approximate messages per second (rough estimate from total / uptime)
-  const uptime = process.uptime();
-  const mps = uptime > 0 ? Math.round(stats.eventsProcessed / uptime * 10) / 10 : 0;
+  const mps = store.getEventsPerSecond();
 
-  // Estimate coverage area from H3 res-3 cells (each ~12,400 km²)
-  const res3Cells = stats.activeCells[3] ?? 0;
-  const coverageAreaKm2 = Math.round(res3Cells * 12400);
+  // Same figure the H3 endpoint reports for the 1h window
+  const coverageAreaKm2 = store.getCoverageAreaKm2('1h');
 
   return c.json({
     messagesPerSecond: mps,

@@ -62,7 +62,8 @@ async function main() {
       `[Stats] processed=${stats.eventsProcessed} rejected=${stats.eventsRejected} ` +
       `withPos=${stats.eventsWithPosition} noPos=${stats.eventsWithoutPosition} ` +
       `stations=${stats.stationsTracked} rawPositions=${nats.rawPositionsFound} ` +
-      `nats: recv=${nats.messagesReceived} parsed=${nats.messagesParsed} errors=${nats.parseErrors}`
+      `nats: recv=${nats.messagesReceived} parsed=${nats.messagesParsed} errors=${nats.parseErrors} ` +
+      `rejections=${JSON.stringify(stats.rejections)} positionsDiscarded=${JSON.stringify(stats.positionsDiscarded)}`
     );
   }, 30_000);
 

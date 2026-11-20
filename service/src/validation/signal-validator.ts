@@ -1,52 +1,49 @@
-import { MAX_RANGE_KM, DEFAULT_MAX_RANGE_KM } from '../compute/signal-analysis.js';
+import { maxRangeKm } from '../compute/signal-analysis.js';
+import { sourceFamily, type SourceFamily } from '../compute/source-family.js';
 
-/** Valid frequency bands by source type (MHz) */
-const FREQUENCY_BANDS: Record<string, Array<{ min: number; max: number }>> = {
-  acarsdec: [{ min: 118, max: 137 }],
-  vdlm2dec: [{ min: 130, max: 140 }],
-  dumpvdl2: [{ min: 130, max: 140 }],
-  dumphfdl: [
-    { min: 2, max: 4 },
-    { min: 4, max: 8 },
-    { min: 8, max: 13 },
-    { min: 13, max: 18 },
-    { min: 17, max: 24 },
-  ],
-  jaero:           [{ min: 1525, max: 1559 }],
-  iridium_toolkit: [{ min: 1616, max: 1626.5 }],
-  aiscatcher:      [{ min: 156, max: 163 }],
+/** Valid frequency bands by source family (MHz) */
+const FREQUENCY_BANDS: Partial<Record<SourceFamily, Array<{ min: number; max: number }>>> = {
+  acars: [{ min: 118, max: 137 }],
+  vdl: [{ min: 130, max: 140 }],
+  hfdl: [{ min: 2, max: 24 }],
+  satcom: [{ min: 1525, max: 1559 }, { min: 1616, max: 1626.5 }, { min: 3400, max: 4200 }],
+  ais: [{ min: 156, max: 163 }],
 };
 
-/** Signal level plausibility ranges by source type */
-const SIGNAL_RANGES: Record<string, { min: number; max: number }> = {
-  acarsdec:        { min: -60, max: 10 },
-  vdlm2dec:        { min: -60, max: 10 },
-  dumpvdl2:        { min: -60, max: 10 },
-  dumphfdl:        { min: -40, max: 10 },
-  jaero:           { min: -30, max: 10 },
-  iridium_toolkit: { min: -40, max: 10 },
-  satdump:         { min: -30, max: 10 },
-  aiscatcher:      { min: -60, max: 10 },
+/** Signal level plausibility ranges by source family */
+const SIGNAL_RANGES: Partial<Record<SourceFamily, { min: number; max: number }>> = {
+  acars:  { min: -60, max: 10 },
+  vdl:    { min: -60, max: 10 },
+  hfdl:   { min: -40, max: 10 },
+  satcom: { min: -40, max: 10 },
+  ais:    { min: -60, max: 10 },
 };
+
+export type SignalRejection = 'signal_level' | 'error_count';
 
 export interface SignalValidationResult {
   valid: boolean;
+  /** Set when valid is false */
+  reason?: SignalRejection;
   warnings: string[];
 }
 
-/** Validate signal characteristics for a given source type */
+/**
+ * Validate signal characteristics for a given source type.
+ * Range plausibility is separate: see isPlausibleRange.
+ */
 export function validateSignal(
   sourceType: string,
   frequency: number | null,
   signalLevel: number | null,
   errorCount: number | null,
-  distanceKm: number | null,
 ): SignalValidationResult {
   const warnings: string[] = [];
+  const family = sourceFamily(sourceType);
 
   // Frequency validation
   if (frequency !== null && frequency > 0) {
-    const bands = FREQUENCY_BANDS[sourceType];
+    const bands = FREQUENCY_BANDS[family];
     if (bands) {
       const inBand = bands.some(b => frequency >= b.min && frequency <= b.max);
       if (!inBand) {
@@ -57,7 +54,7 @@ export function validateSignal(
 
   // Signal level validation
   if (signalLevel !== null) {
-    const range = SIGNAL_RANGES[sourceType];
+    const range = SIGNAL_RANGES[family];
     if (range) {
       if (signalLevel < range.min || signalLevel > range.max) {
         warnings.push(`signal level ${signalLevel} outside expected range for ${sourceType}`);
@@ -65,26 +62,22 @@ export function validateSignal(
     }
     // Impossible positive signal (>10 dBm is unrealistic for passive receivers)
     if (signalLevel > 10) {
-      return { valid: false, warnings: [`impossible signal level: ${signalLevel}`] };
+      return { valid: false, reason: 'signal_level', warnings: [`impossible signal level: ${signalLevel}`] };
     }
   }
 
   // Error count validation
   if (errorCount !== null && errorCount > 100) {
-    return { valid: false, warnings: [`extreme error count: ${errorCount}`] };
-  }
-
-  // Range plausibility
-  if (distanceKm !== null && distanceKm > 0) {
-    const maxRange = MAX_RANGE_KM[sourceType] ?? DEFAULT_MAX_RANGE_KM;
-    // Allow 20% over max range for atmospheric conditions
-    if (distanceKm > maxRange * 1.2) {
-      return {
-        valid: false,
-        warnings: [`distance ${distanceKm.toFixed(0)} km exceeds max ${maxRange} km for ${sourceType}`],
-      };
-    }
+    return { valid: false, reason: 'error_count', warnings: [`extreme error count: ${errorCount}`] };
   }
 
   return { valid: true, warnings };
+}
+
+/**
+ * Whether a target at this distance could have been heard on this kind of link.
+ * Allows 20% over the nominal maximum for unusual propagation.
+ */
+export function isPlausibleRange(sourceType: string, distanceKm: number): boolean {
+  return distanceKm <= maxRangeKm(sourceType) * 1.2;
 }

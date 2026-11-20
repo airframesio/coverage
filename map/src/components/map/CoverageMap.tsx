@@ -121,7 +121,10 @@ export default function CoverageMap() {
       const res = await fetch(`${API_URL}/api/v1/coverage/h3?${params}`);
       if (res.ok) {
         const data = await res.json();
-        setHexData(data.cells ?? []);
+        setHexData(
+          data.cells ?? [],
+          typeof data.coverageAreaKm2 === 'number' ? data.coverageAreaKm2 : null,
+        );
       }
     } catch { /* retry next interval */ }
   }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
