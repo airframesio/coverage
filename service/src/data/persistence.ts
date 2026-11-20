@@ -2,6 +2,7 @@ import { getPool } from './database.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
 import { WINDOW_CONFIGS } from '../types/coverage.js';
 import { shouldMaintainResolution } from '../compute/h3-indexer.js';
+import { jobStatus } from '../metrics/job-status.js';
 
 // Only persist windows >= 1h (short windows rebuild fast from live traffic)
 const PERSIST_WINDOW_NAMES = ['1h', '6h', '12h', '24h', '1w', '1mo'];
@@ -38,6 +39,7 @@ export class Persistence {
   async save(): Promise<void> {
     const db = getPool();
     let saved = 0;
+    const startedAt = Date.now();
 
     try {
       for (const windowName of PERSIST_WINDOW_NAMES) {
@@ -93,6 +95,9 @@ export class Persistence {
           saved++;
         }
       }
+
+      jobStatus.snapshotLastSuccess = Date.now() / 1000;
+      jobStatus.snapshotDurationSeconds = (Date.now() - startedAt) / 1000;
 
       if (saved > 0) {
         console.log(`[Persistence] Saved ${saved} snapshots`);

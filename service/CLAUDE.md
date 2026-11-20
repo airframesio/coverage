@@ -34,6 +34,12 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   treated like satellite relays: every position is kept, with no range limit and
   no range or direction for the station
 - Hono REST API on port 3002
+- Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
+  port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`
+  or `X-Monitoring-Token` and answers 401 when the variable is unset. Every value
+  is read at scrape time from the counters `/api/v1/health` reports
+  (src/metrics/metrics.ts). Names follow the Airframes metrics contract, prefix
+  `coverage_`; keep labels to small fixed sets (no station ids or idents).
 - Station metadata synced from main API (authoritative coordinates)
 
 ## Key Directories
@@ -42,6 +48,7 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - src/compute/ - Distance, bearing, H3 indexing, signal analysis
 - src/aggregation/ - Sliding windows and coverage store
 - src/api/ - Hono HTTP routes
+- src/metrics/ - Prometheus registry and job status for `/metrics`
 - src/sync/ - Station metadata sync from main API
 
 ## Environment Variables
@@ -51,4 +58,5 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - PORT - HTTP port (default 3002)
 - DATABASE_URL - PostgreSQL connection string
 - AREA_FEED_STATIONS - comma-separated idents of stations that relay an area feed (default `NCT`)
+- MONITORING_TOKEN - token Prometheus sends to scrape `/metrics`; unset means the route always answers 401
 - MARINE_COVERAGE_ENABLED - set to `false` to leave the marine subjects unsubscribed
