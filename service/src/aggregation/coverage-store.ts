@@ -325,63 +325,34 @@ export class CoverageStore {
   }
 
   /**
-   * Get per-station message counts derived from the H3 sliding windows.
-   * Unlike StationCoverage (which accumulates forever), this properly
-   * reflects only messages within the selected time window.
+   * Per-station message counts within a time window, from the per-station
+   * sliding windows, which count every accepted event exactly once.
+   *
+   * These must not be derived from the H3 cells: a cell's count is the total
+   * of every station that reported into it, so crediting it to each of those
+   * stations multiplies the figure wherever stations share a cell, and events
+   * without a position are in no cell at all.
    */
   getStationMessageCounts(windowName: string): Map<number, { messageCount: number; maxDistance: number }> {
     const stationCounts = new Map<number, { messageCount: number; maxDistance: number }>();
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1) return stationCounts;
 
-    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === 3);
-
-    // Scan the requested window AND all shorter windows.
-    // A station visible in a shorter window must appear in all longer windows.
-    // Use the requested window's counts as the primary, but ensure stations
-    // from shorter windows are included.
-    const windowsToCheck = ri !== -1
-      ? Array.from({ length: wi + 1 }, (_, i) => i)
-      : [];
-
-    for (const checkWi of windowsToCheck) {
-      if (ri === -1) continue;
-      const aggregated = this.aggregated(ri, checkWi);
-
-      // Sum this window's cells per station on their own. Windows overlap, so
-      // totals from different windows must never be added together.
-      const windowCounts = new Map<number, number>();
-      for (const [, cell] of aggregated) {
-        for (const stationId of cellStationIds(cell)) {
-          windowCounts.set(stationId, (windowCounts.get(stationId) ?? 0) + cell.messageCount);
-          const existing = stationCounts.get(stationId);
-          if (existing) {
-            existing.maxDistance = Math.max(existing.maxDistance, cell.maxDistance);
-          } else {
-            stationCounts.set(stationId, { messageCount: 0, maxDistance: cell.maxDistance });
-          }
-        }
-      }
-
-      for (const [stationId, count] of windowCounts) {
-        const existing = stationCounts.get(stationId)!;
-        // The requested window is authoritative. A station seen only in shorter
-        // windows keeps the largest single-window count.
-        existing.messageCount = checkWi === wi ? count : Math.max(existing.messageCount, count);
-      }
+    // The requested window is authoritative. Slices of different windows do not
+    // rotate together, so a station can be in a shorter window and just have left
+    // this one; it is then listed with its largest single-window count. Windows
+    // overlap, so their counts are never added together.
+    for (const [stationId, totals] of this.stationWindows[wi].stationTotals()) {
+      stationCounts.set(stationId, { messageCount: totals.totalMessages, maxDistance: totals.maxDistance });
     }
-
-    // Also check station sliding windows (for persistence-loaded data)
-    for (let swi = 0; swi <= wi && swi < this.stationWindows.length; swi++) {
-      const sw = this.stationWindows[swi];
-      for (const stationId of sw.activeStationIds()) {
-        if (stationCounts.has(stationId)) continue;
-        const cov = sw.getStationCoverage(stationId);
-        if (cov && cov.totalMessages > 0) {
-          stationCounts.set(stationId, {
-            messageCount: cov.totalMessages,
-            maxDistance: cov.maxDistance,
-          });
+    for (let swi = 0; swi < wi; swi++) {
+      for (const [stationId, totals] of this.stationWindows[swi].stationTotals()) {
+        const existing = stationCounts.get(stationId);
+        if (!existing) {
+          stationCounts.set(stationId, { messageCount: totals.totalMessages, maxDistance: totals.maxDistance });
+        } else if (existing.messageCount < totals.totalMessages) {
+          existing.messageCount = totals.totalMessages;
+          existing.maxDistance = Math.max(existing.maxDistance, totals.maxDistance);
         }
       }
     }

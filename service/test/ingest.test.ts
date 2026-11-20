@@ -183,6 +183,27 @@ describe('ingest', () => {
     expect(counts?.maxDistance).toBeGreaterThan(50);
   });
 
+  it('counts each station\'s own messages when stations share a cell', () => {
+    store = new CoverageStore();
+    store.stationMap.set(1, station(1, 50.0, 8.0));
+    store.stationMap.set(2, station(2, 50.1, 8.1));
+
+    // Same target position, so both stations report into the same cells
+    for (let i = 0; i < 30; i++) store.ingest(event(1, 50.3, 8.3));
+    for (let i = 0; i < 5; i++) store.ingest(event(2, 50.3, 8.3));
+    // Messages without a position count too
+    for (let i = 0; i < 4; i++) store.ingest(event(2, null, null));
+
+    for (const window of ['1m', '1h', '1mo']) {
+      const counts = store.getStationMessageCounts(window);
+      expect(counts.get(1)?.messageCount).toBe(30);
+      expect(counts.get(2)?.messageCount).toBe(9);
+    }
+    const total = [...store.getStationMessageCounts('1m').values()].reduce((sum, c) => sum + c.messageCount, 0);
+    expect(total).toBe(store.eventsProcessed);
+    expect(store.getStationMessageCounts('1m').get(1)?.maxDistance).toBeGreaterThan(30);
+  });
+
   it('does not limit how much a station may send', () => {
     store = new CoverageStore();
     store.stationMap.set(20, station(20, 51.95, 4.05));

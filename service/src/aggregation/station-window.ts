@@ -181,6 +181,27 @@ export class StationSlidingWindow {
     return ids;
   }
 
+  /** Message total and furthest reception per station across all slices, in one pass */
+  stationTotals(): Map<number, { totalMessages: number; maxDistance: number }> {
+    const totals = new Map<number, { totalMessages: number; maxDistance: number }>();
+    for (const slice of this.slices) {
+      for (const [key, data] of slice) {
+        if (data.totalMessages === 0) continue;
+        const stationId = parseInt(key, 10);
+        let entry = totals.get(stationId);
+        if (!entry) {
+          entry = { totalMessages: 0, maxDistance: 0 };
+          totals.set(stationId, entry);
+        }
+        entry.totalMessages += data.totalMessages;
+        for (let i = 0; i < 36; i++) {
+          if (data.sectorMaxDist[i] > entry.maxDistance) entry.maxDistance = data.sectorMaxDist[i];
+        }
+      }
+    }
+    return totals;
+  }
+
   /** Events recorded across all slices of this window */
   totalMessages(): number {
     let total = 0;
