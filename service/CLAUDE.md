@@ -30,6 +30,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - No per-station rate limit (busy receivers are legitimate). `/api/v1/health` reports
   `outOfRange` positions by radio family (`near` = within twice the range limit,
   `far` = beyond it)
+- Imported area feeds (station idents in `AREA_FEED_STATIONS`, default `NCT`) are
+  treated like satellite relays: every position is kept, with no range limit and
+  no range or direction for the station
 - Hono REST API on port 3002
 - Station metadata synced from main API (authoritative coordinates)
 
@@ -47,4 +50,5 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - MAIN_API_URL - Main Airframes API (for station sync)
 - PORT - HTTP port (default 3002)
 - DATABASE_URL - PostgreSQL connection string
+- AREA_FEED_STATIONS - comma-separated idents of stations that relay an area feed (default `NCT`)
 - MARINE_COVERAGE_ENABLED - set to `false` to leave the marine subjects unsubscribed

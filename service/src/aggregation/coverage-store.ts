@@ -137,8 +137,13 @@ export class CoverageStore {
 
         // Distance and bearing only mean something when we know where the station
         // is, and when the station hears the target directly. A satellite relay
-        // says nothing about the receiver's own range or direction.
-        directional = stationLocated && sourceFamily(event.sourceType) !== 'satcom';
+        // says nothing about the receiver's own range or direction, and neither
+        // does an imported area feed (see config.areaFeedStations): its positions
+        // are kept wherever they are, with no range limit.
+        const ident = this.stationMap.get(event.stationId)?.ident.toLowerCase() ?? '';
+        directional = stationLocated
+          && sourceFamily(event.sourceType) !== 'satcom'
+          && !config.areaFeedStations.has(ident);
         if (directional) {
           distance = haversineDistance(stationLat, stationLon, event.targetLat, event.targetLon);
           brng = bearing(stationLat, stationLon, event.targetLat, event.targetLon);
