@@ -12,6 +12,28 @@ const PERSIST_RESOLUTIONS = [2, 3, 4];
 const SAVE_INTERVAL = 60_000; // Save every 60 seconds
 
 /**
+ * Replace one snapshot. The delete and the insert are one transaction, so a
+ * connection cut between them (a restart during a save) leaves the old snapshot
+ * in place instead of none.
+ */
+async function replaceSnapshot(
+  deleteSql: string, deleteParams: unknown[], insertSql: string, insertParams: unknown[],
+): Promise<void> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(deleteSql, deleteParams);
+    await client.query(insertSql, insertParams);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
  * Periodically persists H3 cell data and station coverage to PostgreSQL
  * so the service can recover state after a restart.
  */
@@ -37,7 +59,6 @@ export class Persistence {
 
   /** Save current state to PostgreSQL */
   async save(): Promise<void> {
-    const db = getPool();
     let saved = 0;
     const startedAt = Date.now();
 
@@ -51,14 +72,10 @@ export class Persistence {
           const cells = this.store.getH3Data(resolution, windowName);
           if (cells.length === 0) continue;
 
-          // Upsert: delete old snapshot, insert new one
-          await db.query(
+          await replaceSnapshot(
             `DELETE FROM coverage_snapshots
              WHERE snapshot_type = 'h3' AND window_name = $1 AND resolution = $2`,
-            [windowName, resolution]
-          );
-
-          await db.query(
+            [windowName, resolution],
             `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, data)
              VALUES ('h3', $1, $2, $3)`,
             [windowName, resolution, JSON.stringify(cells)]
@@ -81,13 +98,10 @@ export class Persistence {
             errorRate: cov.errorRate,
           }));
 
-          await db.query(
+          await replaceSnapshot(
             `DELETE FROM coverage_snapshots
              WHERE snapshot_type = 'stations' AND window_name = $1`,
-            [windowName]
-          );
-
-          await db.query(
+            [windowName],
             `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, data)
              VALUES ('stations', $1, 0, $2)`,
             [windowName, JSON.stringify(stationData)]
@@ -100,8 +114,9 @@ export class Persistence {
       // wrong place again for the first minutes after every restart
       const heard = this.store.getHeardLocations();
       if (heard.length > 0) {
-        await db.query(`DELETE FROM coverage_snapshots WHERE snapshot_type = 'heard_locations'`);
-        await db.query(
+        await replaceSnapshot(
+          `DELETE FROM coverage_snapshots WHERE snapshot_type = 'heard_locations'`,
+          [],
           `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, data)
            VALUES ('heard_locations', 'all', 0, $1)`,
           [JSON.stringify(heard)]
