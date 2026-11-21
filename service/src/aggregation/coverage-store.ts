@@ -259,8 +259,9 @@ export class CoverageStore {
    * the internet provider's city), that hear their targets directly, and that
    * are not area feeds. The station moves to the centre of what it hears when
    * the heard positions form one group no wider than the radio's range and that
-   * centre is further from the registered spot than the group is wide (and at
-   * least 100 km): a real antenna in the right place sits inside its own group.
+   * centre is at least twice as far from the registered spot as the group is
+   * wide (and at least 100 km): a real antenna in the right place sits inside
+   * its own group.
    */
   private placeByHeard(event: CoverageEvent): void {
     const meta = this.stationMap.get(event.stationId);
@@ -292,12 +293,20 @@ export class CoverageStore {
     const offsetKm = registered
       ? haversineDistance(regLat, regLon, estimate.latitude, estimate.longitude)
       : Infinity;
-    const useHeard = oneAntenna && offsetKm > Math.max(HEARD_MIN_OFFSET_KM, estimate.spreadKm);
+    // Moving a station takes a clear case: the centre must be twice as far from
+    // the registered spot as the group is wide. That leaves alone a station that
+    // hears a long stretch of coast or a wide patch of sky, where the centre is
+    // open water or the middle of the traffic, not the antenna. A station already
+    // moved stays moved until the centre is back within the group's own width,
+    // so one near the threshold does not flip back and forth.
+    const placed = meta.locationSource === 'heard';
+    const needed = Math.max(HEARD_MIN_OFFSET_KM, estimate.spreadKm * (placed ? 1 : 2));
+    const useHeard = oneAntenna && offsetKm > needed;
 
     if (useHeard) {
-      // Small drifts of the centre are not worth throwing the sectors away for
-      if (meta.locationSource === 'heard'
-        && haversineDistance(meta.latitude, meta.longitude, estimate.latitude, estimate.longitude) < HEARD_MOVE_KM) return;
+      // Drifts of the centre within the group are not worth throwing the sectors away for
+      if (placed && haversineDistance(meta.latitude, meta.longitude, estimate.latitude, estimate.longitude)
+        < Math.max(HEARD_MOVE_KM, estimate.spreadKm / 2)) return;
       meta.latitude = estimate.latitude;
       meta.longitude = estimate.longitude;
       meta.locationSource = 'heard';
