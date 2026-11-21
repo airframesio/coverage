@@ -29,7 +29,8 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   and discarded positions by reason, and `cellsInMemory`.
 - No per-station rate limit (busy receivers are legitimate). `/api/v1/health` reports
   `outOfRange` positions by radio family (`near` = within twice the range limit,
-  `far` = beyond it)
+  `far` = beyond it), and `outOfRangeStations`: the 20 stations with the most such
+  discards and the furthest distance each saw (a mislocated station shows up here)
 - Imported area feeds (station idents in `AREA_FEED_STATIONS`, default `NCT`) are
   treated like satellite relays: every position is kept, with no range limit and
   no range or direction for the station
