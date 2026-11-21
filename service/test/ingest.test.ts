@@ -424,3 +424,93 @@ describe('stations without an owner-entered location', () => {
     });
   });
 });
+
+describe('restoring station coverage from a snapshot', () => {
+  let store: CoverageStore;
+  afterEach(() => store?.destroy());
+
+  const saved = (stationId: number, total: number) => {
+    const sectorMessageCounts = new Array(36).fill(0);
+    const bearingSectors = new Array(36).fill(0);
+    const sectorAvgLevels = new Array(36).fill(0);
+    sectorMessageCounts[3] = Math.floor(total * 0.5);
+    bearingSectors[3] = 212;
+    sectorAvgLevels[3] = -30;
+    sectorMessageCounts[20] = Math.floor(total * 0.25);
+    bearingSectors[20] = 87;
+    sectorAvgLevels[20] = -20;
+    return {
+      stationId, bearingSectors, sectorMessageCounts, sectorAvgLevels,
+      totalMessages: total, messagesWithPosition: Math.floor(total * 0.8),
+      maxDistance: 212, avgLevel: -25, errorRate: 0.1,
+    };
+  };
+
+  it('brings back totals, sectors, levels and the error rate', () => {
+    store = new CoverageStore();
+    store.stationMap.set(60, station(60, 50, 8));
+
+    store.loadStationSnapshot('24h', [saved(60, 1000)]);
+
+    const coverage = store.getStationCoverage(60, '24h')!;
+    expect(coverage.totalMessages).toBe(1000);
+    expect(coverage.messagesWithPosition).toBe(800);
+    expect(coverage.sectorMessageCounts[3]).toBe(500);
+    expect(coverage.sectorMessageCounts[20]).toBe(250);
+    expect(coverage.bearingSectors[3]).toBe(212);
+    expect(coverage.maxDistance).toBe(212);
+    expect(coverage.sectorAvgLevels[3]).toBeCloseTo(-30);
+    expect(coverage.avgLevel).toBeCloseTo(-25);
+    expect(coverage.errorRate).toBeCloseTo(0.1);
+  });
+
+  it('files a marine station under marine', () => {
+    store = new CoverageStore();
+    store.stationMap.set(61, { ...station(61, 50, 8), sourceType: 'ais' });
+
+    store.loadStationSnapshot('24h', [saved(61, 100)]);
+
+    expect(store.getStationCoverage(61, '24h', 'marine')!.totalMessages).toBe(100);
+    expect(store.getStationCoverage(61, '24h', 'aircraft')).toBeNull();
+  });
+
+  it('uses the transport type saved in the snapshot, with no station metadata', () => {
+    store = new CoverageStore();
+
+    store.loadStationSnapshot('24h', [{ ...saved(62, 100), transportType: 'marine' }]);
+
+    expect(store.getStationCoverage(62, '24h', 'marine')!.totalMessages).toBe(100);
+    expect(store.getStationCoverage(62, '24h', 'aircraft')).toBeNull();
+  });
+
+  it('holds an old snapshot entry back until station metadata arrives', () => {
+    store = new CoverageStore();
+
+    // Saved by an older build (no transport type), loaded while the first sync has failed
+    store.loadStationSnapshot('24h', [saved(63, 100)]);
+    expect(store.getStationCoverage(63, '24h')).toBeNull();
+    expect(store.applyPendingStationSnapshots()).toBe(0);
+
+    store.stationMap.set(63, { ...station(63, 50, 8), sourceType: 'ais' });
+    expect(store.applyPendingStationSnapshots()).toBe(1);
+
+    expect(store.getStationCoverage(63, '24h', 'marine')!.totalMessages).toBe(100);
+    expect(store.getStationCoverage(63, '24h', 'aircraft')).toBeNull();
+    // Saved again, it carries the right type
+    expect(store.getAllStationCoverage('24h', 'marine').map(c => c.stationId)).toEqual([63]);
+    expect(store.applyPendingStationSnapshots()).toBe(0);
+  });
+
+  it('does not take longer for busier stations', () => {
+    store = new CoverageStore();
+    const stations = [];
+    for (let id = 100; id < 900; id++) stations.push({ ...saved(id, 5_000_000), transportType: 'aircraft' });
+
+    const started = performance.now();
+    store.loadStationSnapshot('1mo', stations);
+
+    // Four billion messages; one call per message would take minutes
+    expect(performance.now() - started).toBeLessThan(500);
+    expect(store.getStationCoverage(100, '1mo')!.totalMessages).toBe(5_000_000);
+  });
+});

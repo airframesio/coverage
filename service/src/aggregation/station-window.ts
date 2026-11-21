@@ -105,6 +105,47 @@ export class StationSlidingWindow {
   }
 
   /**
+   * Add saved totals for a station to the current slice in one step. Restoring
+   * a snapshot must not cost one call per saved message: a busy day is tens of
+   * millions of messages per window.
+   */
+  restore(stationId: number, transportType: TransportType, saved: {
+    sectorMaxDist: ArrayLike<number>;
+    sectorMsgCount: ArrayLike<number>;
+    sectorAvgLevel?: ArrayLike<number>;
+    totalMessages: number;
+    messagesWithPosition: number;
+    avgLevel: number | null;
+    errorRate: number;
+  }): void {
+    const key = sliceKey(stationId, transportType);
+    const slice = this.slices[this.currentIndex];
+    let data = slice.get(key);
+    if (!data) {
+      data = createEmptySliceData(transportType);
+      slice.set(key, data);
+    }
+
+    const total = Math.max(0, Math.floor(saved.totalMessages) || 0);
+    data.totalMessages += total;
+    data.messagesWithPosition += Math.min(total, Math.max(0, Math.floor(saved.messagesWithPosition) || 0));
+
+    for (let i = 0; i < 36; i++) {
+      const count = Math.max(0, Math.floor(saved.sectorMsgCount[i] ?? 0) || 0);
+      const dist = saved.sectorMaxDist[i] ?? 0;
+      if (dist > data.sectorMaxDist[i]) data.sectorMaxDist[i] = dist;
+      data.sectorMsgCount[i] += count;
+      data.sectorLevelSum[i] += (saved.sectorAvgLevel?.[i] ?? 0) * count;
+    }
+
+    if (saved.avgLevel !== null && Number.isFinite(saved.avgLevel)) {
+      data.totalLevelSum += saved.avgLevel * total;
+      data.levelCount += total;
+    }
+    data.errorCount += Math.round((saved.errorRate || 0) * total);
+  }
+
+  /**
    * Aggregate all slices into per-station coverage.
    * @param transportFilter - if set, only include data from matching transport types
    */
