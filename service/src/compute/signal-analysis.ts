@@ -18,7 +18,7 @@ export const MAX_RANGE_KM: Record<SourceFamily, number> = {
   vdl:     400,
   hfdl:    4000,
   satcom:  50000,   // relayed by satellite - effectively unlimited
-  ais:     100,     // VHF line of sight; elevated antennas reach 60 nm and more
+  ais:     250,     // 300 km with the 20% margin in isPlausibleRange; good coastal antennas were seen at 140-240 km
   unknown: 1000,
 };
 

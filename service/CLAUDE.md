@@ -34,6 +34,15 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - Imported area feeds (station idents in `AREA_FEED_STATIONS`, default `NCT`) are
   treated like satellite relays: every position is kept, with no range limit and
   no range or direction for the station
+- A station whose location nobody entered only has a GeoIP guess (the provider's
+  city, often hundreds of km off). Such a station is placed at the centre of the
+  positions it hears (median of the last 200) once those form one group no wider
+  than the radio's range and the centre is further from the registered spot than
+  the group is wide (at least 100 km): src/compute/heard-location.ts and
+  `placeByHeard` in the store. Owner-entered locations (`userLatitude` in the main
+  API) are never moved. Station responses carry `locationSource` (`registered` or
+  `heard`), health reports `stationsPlacedByHeard`, and the estimates are saved
+  with the snapshots. Nothing is written back to the main API.
 - Hono REST API on port 3002
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
   port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`

@@ -11,10 +11,16 @@ import { validateCoordinate } from '../validation/coordinate-validator.js';
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
 import { sourceFamily } from '../compute/source-family.js';
+import { HeardLocationEstimator, type HeardLocation } from '../compute/heard-location.js';
 import { config } from '../config.js';
 import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
 import type { CellAggregation, CellResponse, StationCoverage, WindowConfig } from '../types/coverage.js';
 import type { CoverageEvent, StationMeta, TransportType } from '../types/events.js';
+
+/** A heard centre this close to the registered location does not move the station */
+const HEARD_MIN_OFFSET_KM = 100;
+/** A station already placed by what it hears moves again only for a shift this large */
+const HEARD_MOVE_KM = 25;
 
 /** Grid used for coverage area figures */
 const AREA_RESOLUTION = 3;
@@ -56,6 +62,13 @@ export class CoverageStore {
    */
   private outOfRangeByStation = new Map<number, { near: number; far: number; maxDistanceKm: number }>();
 
+  /** Where stations without an owner-entered location appear to be, from what they hear */
+  private heard = new HeardLocationEstimator();
+  /** Stations whose restored estimate has been applied since start */
+  private heardApplied = new Set<number>();
+  /** How many times a station was moved to, or back from, where it is heard */
+  public stationsRelocated = 0;
+
   constructor() {
     // Initialize sliding windows for each resolution x window combination
     // Windows a resolution is not kept for stay empty; they only keep indexing consistent.
@@ -91,11 +104,15 @@ export class CoverageStore {
     // There is deliberately no per-station rate limit: a receiver near a busy
     // port or airport is legitimately far busier than the rest.
 
+    // 2b. A station without an owner-entered location is placed where it is heard
+    this.placeByHeard(event);
+
     // 3. Determine station coordinates
     // Prefer authoritative (synced from main API), fall back to NATS payload
     // when the synced station has no coordinates (common when GeoIP isn't populated)
-    let stationLat = trust.stationLat;
-    let stationLon = trust.stationLon;
+    const located = this.stationMap.get(event.stationId);
+    let stationLat = located?.latitude ?? trust.stationLat;
+    let stationLon = located?.longitude ?? trust.stationLon;
 
     const stationHasCoords = Number.isFinite(stationLat) && Number.isFinite(stationLon)
       && !(Math.abs(stationLat) < 0.01 && Math.abs(stationLon) < 0.01);
@@ -232,6 +249,92 @@ export class CoverageStore {
   private reject(reason: string): void {
     this.eventsRejected++;
     this.rejections[reason] = (this.rejections[reason] ?? 0) + 1;
+  }
+
+  /**
+   * Feed the station's heard-location estimate with this event's position and
+   * move the station when the estimate says the registered spot is wrong.
+   *
+   * Applies only to stations whose location nobody entered (a GeoIP guess, often
+   * the internet provider's city), that hear their targets directly, and that
+   * are not area feeds. The station moves to the centre of what it hears when
+   * the heard positions form one group no wider than the radio's range and that
+   * centre is further from the registered spot than the group is wide (and at
+   * least 100 km): a real antenna in the right place sits inside its own group.
+   */
+  private placeByHeard(event: CoverageEvent): void {
+    const meta = this.stationMap.get(event.stationId);
+    if (!meta || meta.ownerLocated !== false) return;
+    if (sourceFamily(event.sourceType) === 'satcom') return;
+    if (config.areaFeedStations.has(meta.ident.toLowerCase())) return;
+
+    let recomputed = false;
+    if (event.hasTargetPosition && event.targetLat !== null && event.targetLon !== null
+      && validateCoordinate(event.targetLat, event.targetLon).valid) {
+      recomputed = this.heard.add(event.stationId, event.targetLat, event.targetLon);
+    }
+
+    // An estimate restored after a restart is applied on the station's first
+    // event. The saved sectors were measured from it, so they are kept.
+    const restored = !this.heardApplied.has(event.stationId);
+    if (!recomputed && !restored) return;
+    this.heardApplied.add(event.stationId);
+
+    const estimate = this.heard.get(event.stationId);
+    if (!estimate) return;
+
+    const regLat = meta.registeredLatitude ?? meta.latitude;
+    const regLon = meta.registeredLongitude ?? meta.longitude;
+    const registered = Number.isFinite(regLat) && Number.isFinite(regLon)
+      && !(Math.abs(regLat) < 0.01 && Math.abs(regLon) < 0.01);
+
+    const oneAntenna = estimate.spreadKm <= maxRangeKm(event.sourceType);
+    const offsetKm = registered
+      ? haversineDistance(regLat, regLon, estimate.latitude, estimate.longitude)
+      : Infinity;
+    const useHeard = oneAntenna && offsetKm > Math.max(HEARD_MIN_OFFSET_KM, estimate.spreadKm);
+
+    if (useHeard) {
+      // Small drifts of the centre are not worth throwing the sectors away for
+      if (meta.locationSource === 'heard'
+        && haversineDistance(meta.latitude, meta.longitude, estimate.latitude, estimate.longitude) < HEARD_MOVE_KM) return;
+      meta.latitude = estimate.latitude;
+      meta.longitude = estimate.longitude;
+      meta.locationSource = 'heard';
+    } else {
+      if (meta.locationSource !== 'heard') return;
+      meta.latitude = regLat;
+      meta.longitude = regLon;
+      meta.locationSource = 'registered';
+    }
+
+    if (recomputed) {
+      for (const sw of new Set(this.stationWindows)) sw.clearSectors(event.stationId);
+      this.outOfRangeByStation.delete(event.stationId);
+      this.stationsRelocated++;
+    }
+  }
+
+  /** Heard-location estimates, for saving across restarts */
+  getHeardLocations(): Array<HeardLocation & { stationId: number }> {
+    return [...this.heard.entries()].map(([stationId, location]) => ({ stationId, ...location }));
+  }
+
+  loadHeardLocations(saved: any[]): void {
+    for (const s of saved) {
+      if (!Number.isFinite(s?.stationId) || !Number.isFinite(s.latitude) || !Number.isFinite(s.longitude)
+        || !Number.isFinite(s.spreadKm)) continue;
+      this.heard.restore(s.stationId, {
+        latitude: s.latitude, longitude: s.longitude, spreadKm: s.spreadKm, samples: s.samples ?? 0,
+      });
+    }
+  }
+
+  /** Stations currently shown where they are heard, not where they are registered */
+  getStationsPlacedByHeard(): number {
+    let n = 0;
+    for (const meta of this.stationMap.values()) if (meta.locationSource === 'heard') n++;
+    return n;
   }
 
   private discardPosition(reason: string): void {

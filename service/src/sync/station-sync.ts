@@ -102,12 +102,24 @@ export class StationSync {
           }
         }
 
+        // Only an owner-entered location is taken as the antenna's position. Anything
+        // else is a GeoIP guess, which the coverage store may replace with the centre
+        // of what the station hears; that placement survives the sync.
+        const ownerLocated = Number.isFinite(parseFloat(s.userLatitude))
+          && Number.isFinite(parseFloat(s.userLongitude));
+        const prev = this.stationMap.get(id);
+        const keepHeard = !ownerLocated && prev?.locationSource === 'heard';
+
         this.stationMap.set(id, {
           id,
           uuid: s.uuid ?? '',
           ident: s.ident ?? '',
-          latitude: lat,
-          longitude: lon,
+          latitude: keepHeard ? prev.latitude : lat,
+          longitude: keepHeard ? prev.longitude : lon,
+          registeredLatitude: lat,
+          registeredLongitude: lon,
+          ownerLocated,
+          locationSource: keepHeard ? 'heard' : 'registered',
           sourceType: s.sourceType ?? '',
           status: s.status ?? 'unknown',
           flagged: s.flagged ?? false,

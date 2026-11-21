@@ -96,6 +96,7 @@ coverageRoutes.get('/stations/:id', (c) => {
     stationId,
     ident: station.ident,
     position: { lat: station.latitude, lon: station.longitude },
+    locationSource: station.locationSource ?? 'registered',
     sourceType: station.sourceType,
     window: windowName,
     messageCount: windowData.messageCount,

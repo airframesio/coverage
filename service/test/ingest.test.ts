@@ -241,15 +241,101 @@ describe('ingest', () => {
     const marine = { transportType: 'marine' as const, sourceType: 'ais', frequency: null, signalLevel: null };
 
     store.ingest({ ...event(22, 51.95, 5.5), ...marine });  // about 100 km: accepted
-    store.ingest({ ...event(22, 51.95, 6.6), ...marine });  // about 175 km: just outside
+    store.ingest({ ...event(22, 51.95, 7.55), ...marine }); // about 240 km: accepted
+    store.ingest({ ...event(22, 51.95, 8.9), ...marine });  // about 330 km: just outside
     store.ingest({ ...event(22, 40.0, -70.0), ...marine }); // across the Atlantic
 
-    expect(store.eventsWithPosition).toBe(1);
+    expect(store.eventsWithPosition).toBe(2);
     expect(store.positionsDiscarded).toEqual({ out_of_range: 2 });
     expect(store.outOfRange).toEqual({ ais: { near: 1, far: 1 } });
     // and names the station they came from
     const [worst] = store.getOutOfRangeStations();
     expect(worst).toMatchObject({ stationId: 22, ident: 'TEST-22', sourceType: 'ais', near: 1, far: 1 });
     expect(worst.maxDistanceKm).toBeGreaterThan(5000);
+  });
+});
+
+describe('stations without an owner-entered location', () => {
+  let store: CoverageStore;
+  afterEach(() => store?.destroy());
+
+  const marine = { transportType: 'marine' as const, sourceType: 'ais', frequency: null, signalLevel: null };
+  // Registered in Milan (a GeoIP guess); the vessels are in the Strait of Messina
+  const milan = (id: number, ownerLocated: boolean): StationMeta => ({
+    ...station(id, 45.46, 9.19), sourceType: 'ais',
+    registeredLatitude: 45.46, registeredLongitude: 9.19, ownerLocated, locationSource: 'registered',
+  });
+  const hear = (id: number, n: number, lat: number, lon: number, jitter: number) => {
+    for (let i = 0; i < n; i++) {
+      const a = (i * 137.5) * Math.PI / 180;
+      const r = jitter * ((i % 10) + 1) / 10;
+      store.ingest({ ...event(id, lat + r * Math.cos(a), lon + r * Math.sin(a)), ...marine });
+    }
+  };
+
+  it('places a GeoIP-located station at the centre of what it hears', () => {
+    store = new CoverageStore();
+    store.stationMap.set(40, milan(40, false));
+
+    hear(40, 60, 38.2, 15.6, 0.3);
+
+    const meta = store.stationMap.get(40)!;
+    expect(meta.locationSource).toBe('heard');
+    expect(meta.latitude).toBeCloseTo(38.2, 0);
+    expect(meta.longitude).toBeCloseTo(15.6, 0);
+    expect(store.getStationsPlacedByHeard()).toBe(1);
+
+    // Positions heard after the move count, with a plausible range
+    const before = store.eventsWithPosition;
+    hear(40, 10, 38.2, 15.6, 0.3);
+    expect(store.eventsWithPosition).toBe(before + 10);
+    const coverage = store.getStationCoverage(40, '1h');
+    expect(coverage!.maxDistance).toBeGreaterThan(0);
+    expect(coverage!.maxDistance).toBeLessThan(100);
+    // The earlier discards were measured from the wrong place
+    expect(store.getOutOfRangeStations().find(s => s.stationId === 40)).toBeUndefined();
+  });
+
+  it('never moves a station whose owner entered the location', () => {
+    store = new CoverageStore();
+    store.stationMap.set(41, milan(41, true));
+
+    hear(41, 60, 38.2, 15.6, 0.3);
+
+    const meta = store.stationMap.get(41)!;
+    expect(meta.locationSource).toBe('registered');
+    expect(meta.latitude).toBe(45.46);
+    expect(store.eventsWithPosition).toBe(0);
+    expect(store.positionsDiscarded).toEqual({ out_of_range: 60 });
+  });
+
+  it('leaves a station alone when the GeoIP guess is about right', () => {
+    store = new CoverageStore();
+    store.stationMap.set(42, milan(42, false));
+
+    hear(42, 60, 45.2, 9.6, 0.3); // about 45 km from the registered point
+
+    expect(store.stationMap.get(42)!.locationSource).toBe('registered');
+    expect(store.eventsWithPosition).toBe(60);
+  });
+
+  it('does not place a station that relays a wide area', () => {
+    store = new CoverageStore();
+    store.stationMap.set(43, milan(43, false));
+
+    hear(43, 60, 38.2, 15.6, 8); // spread over many hundreds of km
+
+    expect(store.stationMap.get(43)!.locationSource).toBe('registered');
+  });
+
+  it('applies a saved estimate after a restart without waiting for new samples', () => {
+    store = new CoverageStore();
+    store.stationMap.set(44, milan(44, false));
+    store.loadHeardLocations([{ stationId: 44, latitude: 38.2, longitude: 15.6, spreadKm: 30, samples: 200 }]);
+
+    hear(44, 1, 38.25, 15.65, 0);
+
+    expect(store.stationMap.get(44)!.locationSource).toBe('heard');
+    expect(store.eventsWithPosition).toBe(1);
   });
 });

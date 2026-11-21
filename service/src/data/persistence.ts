@@ -96,6 +96,19 @@ export class Persistence {
         }
       }
 
+      // Where GeoIP-located stations are heard, so they are not shown in the
+      // wrong place again for the first minutes after every restart
+      const heard = this.store.getHeardLocations();
+      if (heard.length > 0) {
+        await db.query(`DELETE FROM coverage_snapshots WHERE snapshot_type = 'heard_locations'`);
+        await db.query(
+          `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, data)
+           VALUES ('heard_locations', 'all', 0, $1)`,
+          [JSON.stringify(heard)]
+        );
+        saved++;
+      }
+
       jobStatus.snapshotLastSuccess = Date.now() / 1000;
       jobStatus.snapshotDurationSeconds = (Date.now() - startedAt) / 1000;
 
@@ -144,7 +157,18 @@ export class Persistence {
         }
       }
 
-      console.log(`[Persistence] Loaded ${h3Loaded} H3 cells, ${stationsLoaded} station coverages`);
+      const heardResult = await db.query(
+        `SELECT data FROM coverage_snapshots
+         WHERE snapshot_type = 'heard_locations'
+         ORDER BY created_at DESC LIMIT 1`
+      );
+      const heard = heardResult.rows[0]?.data;
+      if (Array.isArray(heard)) this.store.loadHeardLocations(heard);
+
+      console.log(
+        `[Persistence] Loaded ${h3Loaded} H3 cells, ${stationsLoaded} station coverages, ` +
+        `${Array.isArray(heard) ? heard.length : 0} heard locations`
+      );
     } catch (err) {
       console.error('[Persistence] Load failed:', err instanceof Error ? err.message : err);
     }

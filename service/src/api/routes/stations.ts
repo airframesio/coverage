@@ -41,6 +41,7 @@ stationRoutes.get('/', (c) => {
       ident: meta.ident,
       latitude: meta.latitude,
       longitude: meta.longitude,
+      locationSource: meta.locationSource ?? 'registered',
       sourceType: meta.sourceType,
       messageCount: counts.messageCount,
       messagesWithPosition: cov?.messagesWithPosition ?? 0,
