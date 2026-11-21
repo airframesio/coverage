@@ -49,6 +49,12 @@ export class CoverageStore {
    * position or a wrongly located station).
    */
   public outOfRange: Record<string, { near: number; far: number }> = {};
+  /**
+   * The same discards per station, with the furthest distance seen. A station
+   * with many `far` discards is usually located in the wrong place (GeoIP) or
+   * relays a feed from elsewhere, which the per-family totals cannot show.
+   */
+  private outOfRangeByStation = new Map<number, { near: number; far: number; maxDistanceKm: number }>();
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
@@ -155,7 +161,7 @@ export class CoverageStore {
           // the event as proof the station is receiving and drop the position.
           if (!isPlausibleRange(event.sourceType, distance)) {
             this.discardPosition('out_of_range');
-            this.countOutOfRange(event.sourceType, distance);
+            this.countOutOfRange(event.sourceType, distance, event.stationId);
             hasValidTarget = false;
             directional = false;
             distance = 0;
@@ -232,11 +238,43 @@ export class CoverageStore {
     this.positionsDiscarded[reason] = (this.positionsDiscarded[reason] ?? 0) + 1;
   }
 
-  private countOutOfRange(sourceType: string, distanceKm: number): void {
+  private countOutOfRange(sourceType: string, distanceKm: number, stationId: number): void {
     const family = sourceFamily(sourceType);
+    const far = distanceKm > maxRangeKm(sourceType) * 2;
     const entry = (this.outOfRange[family] ??= { near: 0, far: 0 });
-    if (distanceKm <= maxRangeKm(sourceType) * 2) entry.near++;
-    else entry.far++;
+    let station = this.outOfRangeByStation.get(stationId);
+    if (!station) {
+      station = { near: 0, far: 0, maxDistanceKm: 0 };
+      this.outOfRangeByStation.set(stationId, station);
+    }
+    if (far) {
+      entry.far++;
+      station.far++;
+    } else {
+      entry.near++;
+      station.near++;
+    }
+    if (distanceKm > station.maxDistanceKm) station.maxDistanceKm = distanceKm;
+  }
+
+  /** Stations with the most out-of-range positions since start, worst first */
+  getOutOfRangeStations(limit = 20): Array<{
+    stationId: number; ident: string; sourceType: string; near: number; far: number; maxDistanceKm: number;
+  }> {
+    return [...this.outOfRangeByStation]
+      .sort(([, a], [, b]) => (b.near + b.far) - (a.near + a.far))
+      .slice(0, limit)
+      .map(([stationId, counts]) => {
+        const meta = this.stationMap.get(stationId);
+        return {
+          stationId,
+          ident: meta?.ident ?? '',
+          sourceType: meta?.sourceType ?? '',
+          near: counts.near,
+          far: counts.far,
+          maxDistanceKm: Math.round(counts.maxDistanceKm),
+        };
+      });
   }
 
   private updateStationCoverage(

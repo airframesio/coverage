@@ -247,5 +247,9 @@ describe('ingest', () => {
     expect(store.eventsWithPosition).toBe(1);
     expect(store.positionsDiscarded).toEqual({ out_of_range: 2 });
     expect(store.outOfRange).toEqual({ ais: { near: 1, far: 1 } });
+    // and names the station they came from
+    const [worst] = store.getOutOfRangeStations();
+    expect(worst).toMatchObject({ stationId: 22, ident: 'TEST-22', sourceType: 'ais', near: 1, far: 1 });
+    expect(worst.maxDistanceKm).toBeGreaterThan(5000);
   });
 });
