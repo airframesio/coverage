@@ -275,7 +275,7 @@ export class CoverageStore {
     let recomputed = false;
     if (event.hasTargetPosition && event.targetLat !== null && event.targetLon !== null
       && validateCoordinate(event.targetLat, event.targetLon).valid) {
-      recomputed = this.heard.add(event.stationId, event.targetLat, event.targetLon, profile, event.timestamp.getTime());
+      recomputed = this.heard.add(event.stationId, event.targetLat, event.targetLon, profile);
     }
 
     // An estimate restored after a restart is applied on the station's first

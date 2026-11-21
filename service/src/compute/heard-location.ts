@@ -72,9 +72,9 @@ export class HeardLocationEstimator {
       s = { points: new Float64Array(profile.capacity * 2), count: 0, next: 0, sinceCompute: 0, lastAt: -Infinity };
       this.samples.set(stationId, s);
     }
-    // A timestamp earlier than the last one (a late message) is taken rather than waited out
-    const gap = now - s.lastAt;
-    if (gap >= 0 && gap < profile.minIntervalMs) return false;
+    // `now` is the arrival time, not the message's own timestamp: messages
+    // arrive out of order and a bad timestamp must not defeat the spacing.
+    if (Math.abs(now - s.lastAt) < profile.minIntervalMs) return false;
     s.lastAt = now;
     s.points[s.next * 2] = latitude;
     s.points[s.next * 2 + 1] = longitude;

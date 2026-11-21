@@ -355,12 +355,16 @@ describe('stations without an owner-entered location', () => {
       ...station(id, 45.46, 9.19),
       registeredLatitude: 45.46, registeredLongitude: 9.19, ownerLocated: false, locationSource: 'registered',
     });
-    const hearAircraft = (id: number, n: number, stepMs: number, startMs = Date.now() - n * stepMs) => {
+    afterEach(() => vi.useRealTimers());
+    // Positions arriving stepMs apart (spacing goes by arrival time)
+    const hearAircraft = (id: number, n: number, stepMs: number) => {
+      vi.useFakeTimers({ toFake: ['Date'] });
+      const start = Date.now();
       for (let i = 0; i < n; i++) {
+        vi.setSystemTime(start + i * stepMs);
         const a = (i * 137.5) * Math.PI / 180;
         const r = 1.2 * ((i % 10) + 1) / 10;
-        store.ingest({ ...event(id, 38.2 + r * Math.cos(a), 15.6 + r * Math.sin(a)),
-          timestamp: new Date(startMs + i * stepMs) });
+        store.ingest(event(id, 38.2 + r * Math.cos(a), 15.6 + r * Math.sin(a)));
       }
     };
 
@@ -380,6 +384,21 @@ describe('stations without an owner-entered location', () => {
       hearAircraft(51, 3000, 100); // five minutes of traffic
 
       expect(store.stationMap.get(51)!.locationSource).toBe('registered');
+    });
+
+    it('do not count positions by their own timestamps', () => {
+      store = new CoverageStore();
+      store.stationMap.set(54, vdl(54));
+
+      // All arrive at once, each claiming to be 10 seconds before the last
+      const now = Date.now();
+      for (let i = 0; i < 1500; i++) {
+        const a = (i * 137.5) * Math.PI / 180;
+        store.ingest({ ...event(54, 38.2 + 0.5 * Math.cos(a), 15.6 + 0.5 * Math.sin(a)),
+          timestamp: new Date(now - i * 10_000) });
+      }
+
+      expect(store.stationMap.get(54)!.locationSource).toBe('registered');
     });
 
     it('are placed after 1,000 positions spread over hours', () => {
