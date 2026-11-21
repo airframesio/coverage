@@ -34,8 +34,16 @@ export interface StationMeta {
   id: number;
   uuid: string;
   ident: string;
+  /** Effective location: the registered one, or where the station is heard (see locationSource) */
   latitude: number;
   longitude: number;
+  /** Location as the main API reports it */
+  registeredLatitude?: number;
+  registeredLongitude?: number;
+  /** True when the owner entered the location; false when it is only a GeoIP guess */
+  ownerLocated?: boolean;
+  /** 'heard' when latitude/longitude were placed at the centre of what the station hears */
+  locationSource?: 'registered' | 'heard';
   sourceType: string;
   status: string;
   flagged: boolean;

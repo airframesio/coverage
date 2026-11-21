@@ -181,6 +181,23 @@ export class StationSlidingWindow {
     return ids;
   }
 
+  /**
+   * Forget a station's range and direction, keeping its message counts. Used
+   * when the station turns out to be somewhere else: distances and bearings
+   * measured from the old spot mean nothing.
+   */
+  clearSectors(stationId: number): void {
+    const prefix = `${stationId}:`;
+    for (const slice of this.slices) {
+      for (const [key, data] of slice) {
+        if (!key.startsWith(prefix)) continue;
+        data.sectorMaxDist.fill(0);
+        data.sectorMsgCount.fill(0);
+        data.sectorLevelSum.fill(0);
+      }
+    }
+  }
+
   /** Message total and furthest reception per station across all slices, in one pass */
   stationTotals(): Map<number, { totalMessages: number; maxDistance: number }> {
     const totals = new Map<number, { totalMessages: number; maxDistance: number }>();
