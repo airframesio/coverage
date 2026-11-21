@@ -32,6 +32,7 @@ healthRoutes.get('/health', (c) => {
     },
     coverage: {
       eventsProcessed: stats.eventsProcessed,
+      processedBySource: stats.processedBySource,
       eventsRejected: stats.eventsRejected,
       eventsWithPosition: stats.eventsWithPosition,
       eventsWithoutPosition: stats.eventsWithoutPosition,

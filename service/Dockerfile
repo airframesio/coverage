@@ -22,6 +22,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3002
 
+# Commit the image was built from, reported as coverage_build_info{commit}
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
+
 RUN addgroup --system --gid 1001 appgroup && \
     adduser --system --uid 1001 appuser
 

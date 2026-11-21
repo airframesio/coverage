@@ -34,6 +34,8 @@ export class CoverageStore {
 
   // Metrics
   public eventsProcessed = 0;
+  /** Accepted events by radio family. Sums to eventsProcessed. */
+  public processedBySource: Record<string, number> = {};
   public eventsRejected = 0;
   public eventsWithPosition = 0;
   public eventsWithoutPosition = 0;
@@ -167,6 +169,8 @@ export class CoverageStore {
     else this.eventsWithoutPosition++;
 
     this.eventsProcessed++;
+    const family = sourceFamily(event.sourceType);
+    this.processedBySource[family] = (this.processedBySource[family] ?? 0) + 1;
 
     // 5. Index into H3 cells
     // If we have a target position, index at the target (aircraft/vessel) location.
@@ -408,6 +412,7 @@ export class CoverageStore {
   /** Get summary metrics */
   getStats(): {
     eventsProcessed: number;
+    processedBySource: Record<string, number>;
     eventsRejected: number;
     eventsWithPosition: number;
     eventsWithoutPosition: number;
@@ -428,6 +433,7 @@ export class CoverageStore {
 
     return {
       eventsProcessed: this.eventsProcessed,
+      processedBySource: { ...this.processedBySource },
       eventsRejected: this.eventsRejected,
       eventsWithPosition: this.eventsWithPosition,
       eventsWithoutPosition: this.eventsWithoutPosition,

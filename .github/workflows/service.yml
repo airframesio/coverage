@@ -104,6 +104,8 @@ jobs:
         with:
           context: service
           push: true
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           # The sha tag gives production an immutable reference to pin.
           tags: |
             ghcr.io/airframesio/coverage-service:latest

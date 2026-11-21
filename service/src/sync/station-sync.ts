@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import type { StationMeta } from '../types/events.js';
 import { toStationId } from '../nats/parsers/station-id.js';
+import { jobStatus } from '../metrics/job-status.js';
 
 /**
  * Periodically syncs station metadata from the main API.
@@ -116,6 +117,8 @@ export class StationSync {
         });
         updated++;
       }
+
+      jobStatus.stationSyncLastSuccess = Date.now() / 1000;
 
       const withCoords = [...this.stationMap.values()].filter(
         s => s.latitude !== 0 || s.longitude !== 0
