@@ -18,7 +18,13 @@ async function main() {
   // 1. Initialize coverage store
   const store = new CoverageStore();
 
-  // 2. Initialize database and load persisted data
+  // 2. Start station metadata sync. Before the snapshots, because restoring a
+  // station's coverage needs to know whether it is a marine or aircraft station,
+  // and before NATS so trust checks work.
+  const stationSync = new StationSync(store.stationMap);
+  await stationSync.start();
+
+  // 3. Initialize database and load persisted data
   let persistence: Persistence | null = null;
   try {
     await migrate();
@@ -29,10 +35,6 @@ async function main() {
     console.error('[DB] Database not available:', err instanceof Error ? err.message : err);
     console.log('[DB] Continuing without persistence — data will be in-memory only');
   }
-
-  // 3. Start station metadata sync (must be before NATS so trust checks work)
-  const stationSync = new StationSync(store.stationMap);
-  await stationSync.start();
 
   // 4. Connect to NATS and start ingesting
   const nats = new NatsSubscriber((event) => store.ingest(event), store.stationMap);

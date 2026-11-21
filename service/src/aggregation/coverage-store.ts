@@ -644,28 +644,15 @@ export class CoverageStore {
       const meta = this.stationMap.get(s.stationId);
       const tt: TransportType = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais')
         ? 'marine' : 'aircraft';
-      // Record each sector's data into the current slice
-      for (let i = 0; i < 36; i++) {
-        const dist = s.bearingSectors[i] ?? 0;
-        const count = s.sectorMessageCounts?.[i] ?? 0;
-        if (dist > 0 || count > 0) {
-          for (let j = 0; j < count; j++) {
-            sw.record(s.stationId, i, dist, s.sectorAvgLevels?.[i] ?? null, true, false, tt);
-          }
-        }
-      }
-      // Positions that carry no sector (satellite relays, unlocated stations)
-      let sectorTotal = 0;
-      for (let i = 0; i < 36; i++) sectorTotal += s.sectorMessageCounts?.[i] ?? 0;
-      const unsectored = Math.max(0, (s.messagesWithPosition ?? 0) - sectorTotal);
-      for (let j = 0; j < unsectored; j++) {
-        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, true, false, tt);
-      }
-      // Record messages without position
-      const noPos = (s.totalMessages ?? 0) - (s.messagesWithPosition ?? 0);
-      for (let j = 0; j < noPos; j++) {
-        sw.record(s.stationId, -1, 0, s.avgLevel ?? null, false, false, tt);
-      }
+      sw.restore(s.stationId, tt, {
+        sectorMaxDist: s.bearingSectors,
+        sectorMsgCount: s.sectorMessageCounts ?? [],
+        sectorAvgLevel: s.sectorAvgLevels,
+        totalMessages: s.totalMessages ?? 0,
+        messagesWithPosition: s.messagesWithPosition ?? 0,
+        avgLevel: typeof s.avgLevel === 'number' ? s.avgLevel : null,
+        errorRate: s.errorRate ?? 0,
+      });
     }
   }
 
