@@ -348,4 +348,60 @@ describe('stations without an owner-entered location', () => {
 
     expect(store.stationMap.get(45)!.locationSource).toBe('registered');
   });
+
+  describe('aircraft stations', () => {
+    // Registered in Milan (a GeoIP guess); the aircraft are over Sicily
+    const vdl = (id: number): StationMeta => ({
+      ...station(id, 45.46, 9.19),
+      registeredLatitude: 45.46, registeredLongitude: 9.19, ownerLocated: false, locationSource: 'registered',
+    });
+    const hearAircraft = (id: number, n: number, stepMs: number, startMs = Date.now() - n * stepMs) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i * 137.5) * Math.PI / 180;
+        const r = 1.2 * ((i % 10) + 1) / 10;
+        store.ingest({ ...event(id, 38.2 + r * Math.cos(a), 15.6 + r * Math.sin(a)),
+          timestamp: new Date(startMs + i * stepMs) });
+      }
+    };
+
+    it('are not placed by a few flights', () => {
+      store = new CoverageStore();
+      store.stationMap.set(50, vdl(50));
+
+      hearAircraft(50, 300, 10_000);
+
+      expect(store.stationMap.get(50)!.locationSource).toBe('registered');
+    });
+
+    it('are not placed by a burst of positions in a short time', () => {
+      store = new CoverageStore();
+      store.stationMap.set(51, vdl(51));
+
+      hearAircraft(51, 3000, 100); // five minutes of traffic
+
+      expect(store.stationMap.get(51)!.locationSource).toBe('registered');
+    });
+
+    it('are placed after 1,000 positions spread over hours', () => {
+      store = new CoverageStore();
+      store.stationMap.set(52, vdl(52));
+
+      hearAircraft(52, 1000, 10_000);
+
+      const meta = store.stationMap.get(52)!;
+      expect(meta.locationSource).toBe('heard');
+      expect(meta.latitude).toBeCloseTo(38.2, 0);
+      expect(meta.longitude).toBeCloseTo(15.6, 0);
+    });
+
+    it('ignore an estimate saved from too few positions', () => {
+      store = new CoverageStore();
+      store.stationMap.set(53, vdl(53));
+      store.loadHeardLocations([{ stationId: 53, latitude: 38.2, longitude: 15.6, spreadKm: 90, samples: 200 }]);
+
+      hearAircraft(53, 1, 10_000);
+
+      expect(store.stationMap.get(53)!.locationSource).toBe('registered');
+    });
+  });
 });
