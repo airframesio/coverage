@@ -252,6 +252,11 @@ describe('ingest', () => {
     const [worst] = store.getOutOfRangeStations();
     expect(worst).toMatchObject({ stationId: 22, ident: 'TEST-22', sourceType: 'ais', near: 1, far: 1 });
     expect(worst.maxDistanceKm).toBeGreaterThan(5000);
+    // and how far out they were
+    const bands = store.getOutOfRangeDistances().ais;
+    expect(bands.upTo500).toBe(1);
+    expect(bands.upTo10000).toBe(1);
+    expect(Object.values(bands).reduce((a, b) => a + b, 0)).toBe(2);
   });
 });
 

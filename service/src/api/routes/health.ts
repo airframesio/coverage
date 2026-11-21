@@ -39,6 +39,7 @@ healthRoutes.get('/health', (c) => {
       rejections: stats.rejections,
       positionsDiscarded: stats.positionsDiscarded,
       outOfRange: stats.outOfRange,
+      outOfRangeDistanceKm: store.getOutOfRangeDistances(),
       outOfRangeStations: store.getOutOfRangeStations(),
       stationsPlacedByHeard: store.getStationsPlacedByHeard(),
       stationsTracked: stats.stationsTracked,

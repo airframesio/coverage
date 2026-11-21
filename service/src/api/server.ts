@@ -4,6 +4,7 @@ import { coverageRoutes } from './routes/coverage.js';
 import { stationRoutes } from './routes/stations.js';
 import { healthRoutes } from './routes/health.js';
 import { metricsRoutes } from './routes/metrics.js';
+import { responseCache } from './response-cache.js';
 import { createMetricsRegistry } from '../metrics/metrics.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
 import type { NatsSubscriber } from '../nats/subscriber.js';
@@ -31,6 +32,13 @@ export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hon
     c.set('nats', nats);
     await next();
   });
+
+  // Share one computed answer between everyone asking within a few seconds.
+  // Maps poll every 10 s. Health is not cached: it is the liveness check.
+  app.use('/api/v1/coverage/*', responseCache(10_000));
+  app.use('/api/v1/stations', responseCache(10_000));
+  app.use('/api/v1/stations/*', responseCache(10_000));
+  app.use('/api/v1/stats', responseCache(5_000));
 
   // Mount routes
   app.route('/api/v1/coverage', coverageRoutes);

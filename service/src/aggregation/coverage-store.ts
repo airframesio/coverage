@@ -31,6 +31,9 @@ const AREA_RESOLUTION = 3;
  * Main in-memory coverage data store.
  * Manages sliding windows at multiple H3 resolutions and per-station coverage.
  */
+/** Upper edges (km) of the distance bands out-of-range positions are counted in */
+const OUT_OF_RANGE_BANDS_KM = [500, 750, 1000, 1500, 2000, 3000, 5000, 10000];
+
 const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
 
 export class CoverageStore {
@@ -64,6 +67,8 @@ export class CoverageStore {
    * with many `far` discards is usually located in the wrong place (GeoIP) or
    * relays a feed from elsewhere, which the per-family totals cannot show.
    */
+  /** How far out the discarded positions were, by radio family and distance band */
+  private outOfRangeDistances: Record<string, number[]> = {};
   private outOfRangeByStation = new Map<number, { near: number; far: number; maxDistanceKm: number }>();
 
   /** Where stations without an owner-entered location appear to be, from what they hear */
@@ -360,6 +365,10 @@ export class CoverageStore {
     const family = sourceFamily(sourceType);
     const far = distanceKm > maxRangeKm(sourceType) * 2;
     const entry = (this.outOfRange[family] ??= { near: 0, far: 0 });
+    const bands = (this.outOfRangeDistances[family] ??= new Array(OUT_OF_RANGE_BANDS_KM.length + 1).fill(0));
+    let band = OUT_OF_RANGE_BANDS_KM.findIndex(limit => distanceKm <= limit);
+    if (band === -1) band = OUT_OF_RANGE_BANDS_KM.length;
+    bands[band]++;
     let station = this.outOfRangeByStation.get(stationId);
     if (!station) {
       station = { near: 0, far: 0, maxDistanceKm: 0 };
@@ -373,6 +382,22 @@ export class CoverageStore {
       station.near++;
     }
     if (distanceKm > station.maxDistanceKm) station.maxDistanceKm = distanceKm;
+  }
+
+  /**
+   * Out-of-range positions since start by distance from the station, per radio
+   * family: `upTo500` is everything up to 500 km, `upTo750` from there to 750 km,
+   * and so on, with `over10000` last. Bands below a family's limit stay at zero.
+   */
+  getOutOfRangeDistances(): Record<string, Record<string, number>> {
+    const result: Record<string, Record<string, number>> = {};
+    for (const [family, bands] of Object.entries(this.outOfRangeDistances)) {
+      const named: Record<string, number> = {};
+      OUT_OF_RANGE_BANDS_KM.forEach((limit, i) => { named[`upTo${limit}`] = bands[i]; });
+      named[`over${OUT_OF_RANGE_BANDS_KM[OUT_OF_RANGE_BANDS_KM.length - 1]}`] = bands[OUT_OF_RANGE_BANDS_KM.length];
+      result[family] = named;
+    }
+    return result;
   }
 
   /** Stations with the most out-of-range positions since start, worst first */
@@ -480,13 +505,7 @@ export class CoverageStore {
   getAllStationCoverage(windowName: string, transportFilter?: TransportType): StationCoverage[] {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1) return [];
-    const sw = this.stationWindows[wi];
-    const results: StationCoverage[] = [];
-    for (const id of sw.activeStationIds(transportFilter)) {
-      const cov = sw.getStationCoverage(id, transportFilter);
-      if (cov && cov.totalMessages > 0) results.push(cov);
-    }
-    return results;
+    return this.stationWindows[wi].allStationCoverage(transportFilter);
   }
 
   /**

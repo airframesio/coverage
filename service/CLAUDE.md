@@ -30,7 +30,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - No per-station rate limit (busy receivers are legitimate). `/api/v1/health` reports
   `outOfRange` positions by radio family (`near` = within twice the range limit,
   `far` = beyond it), and `outOfRangeStations`: the 20 stations with the most such
-  discards and the furthest distance each saw (a mislocated station shows up here)
+  discards and the furthest distance each saw (a mislocated station shows up here),
+  and `outOfRangeDistanceKm`: the same discards per family by distance band
+  (`upTo500` ... `upTo10000`, `over10000`)
 - Imported area feeds (station idents in `AREA_FEED_STATIONS`, default `NCT`) are
   treated like satellite relays: every position is kept, with no range limit and
   no range or direction for the station
@@ -51,7 +53,12 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   `AIRCRAFT_PROFILE`. A saved estimate from fewer positions than that is ignored;
   the samples themselves are not saved, so an unplaced station starts counting
   again at a restart.
-- Hono REST API on port 3002
+- Hono REST API on port 3002. Answers under `/api/v1/coverage`, `/api/v1/stations`
+  (10 s) and `/api/v1/stats` (5 s) are kept and shared between callers asking the
+  same question (src/api/response-cache.ts): they are computed on the thread that
+  takes in events, and every open map polls them. Health is never cached.
+  Anything that builds a list over all stations must do it in one pass over the
+  window slices (`allStationCoverage`), never one scan per station.
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
   port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`
   or `X-Monitoring-Token` and answers 401 when the variable is unset. Every value
