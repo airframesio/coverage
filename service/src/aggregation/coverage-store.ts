@@ -11,7 +11,9 @@ import { validateCoordinate } from '../validation/coordinate-validator.js';
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
 import { sourceFamily } from '../compute/source-family.js';
-import { HeardLocationEstimator, type HeardLocation } from '../compute/heard-location.js';
+import {
+  HeardLocationEstimator, AIRCRAFT_PROFILE, MARINE_PROFILE, type HeardLocation,
+} from '../compute/heard-location.js';
 import { config } from '../config.js';
 import { WINDOW_CONFIGS, H3_RESOLUTION_CONFIGS } from '../types/coverage.js';
 import type { CellAggregation, CellResponse, StationCoverage, WindowConfig } from '../types/coverage.js';
@@ -269,10 +271,11 @@ export class CoverageStore {
     if (sourceFamily(event.sourceType) === 'satcom') return;
     if (config.areaFeedStations.has(meta.ident.toLowerCase())) return;
 
+    const profile = sourceFamily(event.sourceType) === 'ais' ? MARINE_PROFILE : AIRCRAFT_PROFILE;
     let recomputed = false;
     if (event.hasTargetPosition && event.targetLat !== null && event.targetLon !== null
       && validateCoordinate(event.targetLat, event.targetLon).valid) {
-      recomputed = this.heard.add(event.stationId, event.targetLat, event.targetLon);
+      recomputed = this.heard.add(event.stationId, event.targetLat, event.targetLon, profile);
     }
 
     // An estimate restored after a restart is applied on the station's first
@@ -282,7 +285,8 @@ export class CoverageStore {
     this.heardApplied.add(event.stationId);
 
     const estimate = this.heard.get(event.stationId);
-    if (!estimate) return;
+    // Also ignores an estimate saved by a build that asked for fewer positions
+    if (!estimate || estimate.samples < profile.minSamples) return;
 
     const regLat = meta.registeredLatitude ?? meta.latitude;
     const regLon = meta.registeredLongitude ?? meta.longitude;

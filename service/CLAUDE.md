@@ -36,7 +36,7 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   no range or direction for the station
 - A station whose location nobody entered only has a GeoIP guess (the provider's
   city, often hundreds of km off). Such a station is placed at the centre of the
-  positions it hears (median of the last 200) once those form one group no wider
+  positions it hears (median of the recent ones) once those form one group no wider
   than the radio's range and the centre is at least twice as far from the
   registered spot as the group is wide (at least 100 km; a placed station stays
   placed until the centre is back within one width): src/compute/heard-location.ts and
@@ -44,6 +44,13 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   API) are never moved. Station responses carry `locationSource` (`registered` or
   `heard`), health reports `stationsPlacedByHeard`, and the estimates are saved
   with the snapshots. Nothing is written back to the main API.
+  Ships surround a coastal receiver, so an AIS station needs 30 positions (last
+  200 kept). Aircraft pass in streams and a few flights on one airway put the
+  centre 100 to 250 km off, so an aircraft station needs 1,000 positions taken
+  at least 10 seconds apart (last 2,000 kept): `MARINE_PROFILE` and
+  `AIRCRAFT_PROFILE`. A saved estimate from fewer positions than that is ignored;
+  the samples themselves are not saved, so an unplaced station starts counting
+  again at a restart.
 - Hono REST API on port 3002
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
   port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`
