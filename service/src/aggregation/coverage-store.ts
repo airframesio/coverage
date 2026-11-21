@@ -31,6 +31,8 @@ const AREA_RESOLUTION = 3;
  * Main in-memory coverage data store.
  * Manages sliding windows at multiple H3 resolutions and per-station coverage.
  */
+const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
+
 export class CoverageStore {
   /** windows[resolutionIdx][windowIdx] = SlidingWindow */
   private windows: SlidingWindow[][] = [];
@@ -632,33 +634,68 @@ export class CoverageStore {
     }
   }
 
+  /**
+   * Station entries from snapshots of older builds, which do not name a
+   * transport type, held back because station metadata was not available yet
+   */
+  private pendingStationSnapshots: { windowName: string; entry: any }[] = [];
+
   /** Load persisted station coverage into the current sliding window slice */
   loadStationSnapshot(windowName: string, stationData: any[]): void {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1 || !this.stationWindows[wi]) return;
 
-    const sw = this.stationWindows[wi];
     for (const s of stationData) {
       if (!s.stationId || !s.bearingSectors) continue;
       // Snapshots name the transport type. Ones saved by older builds do not,
-      // and fall back to the station's metadata.
-      let tt: TransportType;
-      if (['aircraft', 'marine', 'sonde', 'space'].includes(s.transportType)) {
-        tt = s.transportType;
-      } else {
-        const meta = this.stationMap.get(s.stationId);
-        tt = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais') ? 'marine' : 'aircraft';
+      // and need the station's metadata. With no metadata at all (the first
+      // sync failed) they wait, rather than being filed, and later saved, as
+      // aircraft.
+      if (!TRANSPORT_TYPES.includes(s.transportType) && this.stationMap.size === 0) {
+        this.pendingStationSnapshots.push({ windowName, entry: s });
+        continue;
       }
-      sw.restore(s.stationId, tt, {
-        sectorMaxDist: s.bearingSectors,
-        sectorMsgCount: s.sectorMessageCounts ?? [],
-        sectorAvgLevel: s.sectorAvgLevels,
-        totalMessages: s.totalMessages ?? 0,
-        messagesWithPosition: s.messagesWithPosition ?? 0,
-        avgLevel: typeof s.avgLevel === 'number' ? s.avgLevel : null,
-        errorRate: s.errorRate ?? 0,
-      });
+      this.restoreStationEntry(wi, s);
     }
+  }
+
+  /**
+   * Restore held-back snapshot entries once station metadata has arrived.
+   * Returns how many were restored.
+   */
+  applyPendingStationSnapshots(): number {
+    if (this.pendingStationSnapshots.length === 0 || this.stationMap.size === 0) return 0;
+    const pending = this.pendingStationSnapshots;
+    this.pendingStationSnapshots = [];
+    for (const { windowName, entry } of pending) {
+      const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+      if (wi !== -1 && this.stationWindows[wi]) this.restoreStationEntry(wi, entry);
+    }
+    return pending.length;
+  }
+
+  /** True while snapshot entries wait for station metadata */
+  hasPendingStationSnapshots(): boolean {
+    return this.pendingStationSnapshots.length > 0;
+  }
+
+  private restoreStationEntry(wi: number, s: any): void {
+    let tt: TransportType;
+    if (TRANSPORT_TYPES.includes(s.transportType)) {
+      tt = s.transportType;
+    } else {
+      const meta = this.stationMap.get(s.stationId);
+      tt = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais') ? 'marine' : 'aircraft';
+    }
+    this.stationWindows[wi].restore(s.stationId, tt, {
+      sectorMaxDist: s.bearingSectors,
+      sectorMsgCount: s.sectorMessageCounts ?? [],
+      sectorAvgLevel: s.sectorAvgLevels,
+      totalMessages: s.totalMessages ?? 0,
+      messagesWithPosition: s.messagesWithPosition ?? 0,
+      avgLevel: typeof s.avgLevel === 'number' ? s.avgLevel : null,
+      errorRate: s.errorRate ?? 0,
+    });
   }
 
   destroy(): void {

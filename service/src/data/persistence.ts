@@ -114,7 +114,9 @@ export class Persistence {
             });
           }
         }
-        if (stationData.length > 0) {
+        // While old entries wait for station metadata, the saved snapshot is
+        // the only complete copy: do not replace it with a partial one
+        if (stationData.length > 0 && !this.store.hasPendingStationSnapshots()) {
           await replaceSnapshot(
             `DELETE FROM coverage_snapshots
              WHERE snapshot_type = 'stations' AND window_name = $1`,

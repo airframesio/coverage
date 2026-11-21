@@ -483,10 +483,28 @@ describe('restoring station coverage from a snapshot', () => {
     expect(store.getStationCoverage(62, '24h', 'aircraft')).toBeNull();
   });
 
+  it('holds an old snapshot entry back until station metadata arrives', () => {
+    store = new CoverageStore();
+
+    // Saved by an older build (no transport type), loaded while the first sync has failed
+    store.loadStationSnapshot('24h', [saved(63, 100)]);
+    expect(store.getStationCoverage(63, '24h')).toBeNull();
+    expect(store.applyPendingStationSnapshots()).toBe(0);
+
+    store.stationMap.set(63, { ...station(63, 50, 8), sourceType: 'ais' });
+    expect(store.applyPendingStationSnapshots()).toBe(1);
+
+    expect(store.getStationCoverage(63, '24h', 'marine')!.totalMessages).toBe(100);
+    expect(store.getStationCoverage(63, '24h', 'aircraft')).toBeNull();
+    // Saved again, it carries the right type
+    expect(store.getAllStationCoverage('24h', 'marine').map(c => c.stationId)).toEqual([63]);
+    expect(store.applyPendingStationSnapshots()).toBe(0);
+  });
+
   it('does not take longer for busier stations', () => {
     store = new CoverageStore();
     const stations = [];
-    for (let id = 100; id < 900; id++) stations.push(saved(id, 5_000_000));
+    for (let id = 100; id < 900; id++) stations.push({ ...saved(id, 5_000_000), transportType: 'aircraft' });
 
     const started = performance.now();
     store.loadStationSnapshot('1mo', stations);

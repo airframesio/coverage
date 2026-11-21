@@ -59,6 +59,9 @@ async function main() {
   // 6. Periodic stats logging + UUID index refresh
   setInterval(() => {
     nats.refreshUuidIndex();
+    // Snapshot entries that waited for station metadata (first sync failed)
+    const restored = store.applyPendingStationSnapshots();
+    if (restored > 0) console.log(`[Persistence] Restored ${restored} station coverages that waited for station metadata`);
     const stats = store.getStats();
     console.log(
       `[Stats] processed=${stats.eventsProcessed} rejected=${stats.eventsRejected} ` +
