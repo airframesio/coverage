@@ -35,6 +35,75 @@ function sliceKey(stationId: number, transportType: TransportType): string {
 
 type Slice = Map<string, StationSliceData>;
 
+const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
+
+/** Running totals for one station while its slices are added up */
+interface CoverageAccumulator {
+  result: StationCoverage;
+  totalLevelSum: number;
+  levelCount: number;
+  errorCount: number;
+  sectorLevelSums: Float64Array;
+}
+
+function createAccumulator(stationId: number): CoverageAccumulator {
+  return {
+    result: {
+      stationId,
+      bearingSectors: new Float64Array(36),
+      sectorMessageCounts: new Uint32Array(36),
+      sectorAvgLevels: new Float64Array(36),
+      totalMessages: 0,
+      messagesWithPosition: 0,
+      maxDistance: 0,
+      avgLevel: 0,
+      errorRate: 0,
+      confidence: 0,
+      lastUpdated: 0,
+    },
+    totalLevelSum: 0,
+    levelCount: 0,
+    errorCount: 0,
+    sectorLevelSums: new Float64Array(36),
+  };
+}
+
+function accumulate(acc: CoverageAccumulator, data: StationSliceData): void {
+  const { result } = acc;
+  result.totalMessages += data.totalMessages;
+  result.messagesWithPosition += data.messagesWithPosition;
+  acc.totalLevelSum += data.totalLevelSum;
+  acc.levelCount += data.levelCount;
+  acc.errorCount += data.errorCount;
+
+  for (let i = 0; i < 36; i++) {
+    if (data.sectorMaxDist[i] > result.bearingSectors[i]) {
+      result.bearingSectors[i] = data.sectorMaxDist[i];
+    }
+    result.sectorMessageCounts[i] += data.sectorMsgCount[i];
+    acc.sectorLevelSums[i] += data.sectorLevelSum[i];
+    if (data.sectorMaxDist[i] > result.maxDistance) {
+      result.maxDistance = data.sectorMaxDist[i];
+    }
+  }
+}
+
+/** Turn the totals into averages; null when the station had no traffic */
+function finishCoverage(acc: CoverageAccumulator): StationCoverage | null {
+  const { result } = acc;
+  if (result.totalMessages === 0) return null;
+
+  result.avgLevel = acc.levelCount > 0 ? acc.totalLevelSum / acc.levelCount : 0;
+  result.errorRate = acc.errorCount / result.totalMessages;
+  for (let i = 0; i < 36; i++) {
+    if (result.sectorMessageCounts[i] > 0) {
+      result.sectorAvgLevels[i] = acc.sectorLevelSums[i] / result.sectorMessageCounts[i];
+    }
+  }
+  result.lastUpdated = Date.now();
+  return result;
+}
+
 /**
  * Sliding window for per-station bearing sector data.
  * Data is keyed by stationId+transportType so coverage can be
@@ -146,67 +215,48 @@ export class StationSlidingWindow {
   }
 
   /**
-   * Aggregate all slices into per-station coverage.
+   * Coverage of one station across all slices.
    * @param transportFilter - if set, only include data from matching transport types
    */
   getStationCoverage(stationId: number, transportFilter?: TransportType): StationCoverage | null {
-    const result: StationCoverage = {
-      stationId,
-      bearingSectors: new Float64Array(36),
-      sectorMessageCounts: new Uint32Array(36),
-      sectorAvgLevels: new Float64Array(36),
-      totalMessages: 0,
-      messagesWithPosition: 0,
-      maxDistance: 0,
-      avgLevel: 0,
-      errorRate: 0,
-      confidence: 0,
-      lastUpdated: 0,
-    };
-
-    let totalLevelSum = 0;
-    let levelCount = 0;
-    let errorCount = 0;
-    const sectorLevelSums = new Float64Array(36);
-
+    // Look the station's keys up directly. Scanning every entry of every slice
+    // for one station made the station list cost stations x entries.
+    const keys = (transportFilter ? [transportFilter] : TRANSPORT_TYPES)
+      .map(transportType => sliceKey(stationId, transportType));
+    const acc = createAccumulator(stationId);
     for (const slice of this.slices) {
-      // Check all matching keys for this station
+      for (const key of keys) {
+        const data = slice.get(key);
+        if (data) accumulate(acc, data);
+      }
+    }
+    return finishCoverage(acc);
+  }
+
+  /**
+   * Coverage of every station with traffic, in one pass over the slices.
+   * @param transportFilter - if set, only include data from matching transport types
+   */
+  allStationCoverage(transportFilter?: TransportType): StationCoverage[] {
+    const byStation = new Map<number, CoverageAccumulator>();
+    for (const slice of this.slices) {
       for (const [key, data] of slice) {
-        if (!key.startsWith(`${stationId}:`)) continue;
         if (transportFilter && data.transportType !== transportFilter) continue;
-
-        result.totalMessages += data.totalMessages;
-        result.messagesWithPosition += data.messagesWithPosition;
-        totalLevelSum += data.totalLevelSum;
-        levelCount += data.levelCount;
-        errorCount += data.errorCount;
-
-        for (let i = 0; i < 36; i++) {
-          if (data.sectorMaxDist[i] > result.bearingSectors[i]) {
-            result.bearingSectors[i] = data.sectorMaxDist[i];
-          }
-          result.sectorMessageCounts[i] += data.sectorMsgCount[i];
-          sectorLevelSums[i] += data.sectorLevelSum[i];
-          if (data.sectorMaxDist[i] > result.maxDistance) {
-            result.maxDistance = data.sectorMaxDist[i];
-          }
+        const stationId = parseInt(key, 10);
+        let acc = byStation.get(stationId);
+        if (!acc) {
+          acc = createAccumulator(stationId);
+          byStation.set(stationId, acc);
         }
+        accumulate(acc, data);
       }
     }
-
-    if (result.totalMessages === 0) return null;
-
-    result.avgLevel = levelCount > 0 ? totalLevelSum / levelCount : 0;
-    result.errorRate = result.totalMessages > 0 ? errorCount / result.totalMessages : 0;
-
-    for (let i = 0; i < 36; i++) {
-      if (result.sectorMessageCounts[i] > 0) {
-        result.sectorAvgLevels[i] = sectorLevelSums[i] / result.sectorMessageCounts[i];
-      }
+    const results: StationCoverage[] = [];
+    for (const acc of byStation.values()) {
+      const coverage = finishCoverage(acc);
+      if (coverage) results.push(coverage);
     }
-
-    result.lastUpdated = Date.now();
-    return result;
+    return results;
   }
 
   /** Get all unique station IDs, optionally filtered by transport type */
