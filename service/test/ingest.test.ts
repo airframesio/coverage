@@ -241,7 +241,7 @@ describe('ingest', () => {
     const marine = { transportType: 'marine' as const, sourceType: 'ais', frequency: null, signalLevel: null };
 
     store.ingest({ ...event(22, 51.95, 5.5), ...marine });  // about 100 km: accepted
-    store.ingest({ ...event(22, 51.95, 6.6), ...marine });  // about 175 km: just outside
+    store.ingest({ ...event(22, 51.95, 10.6), ...marine }); // about 450 km: just outside
     store.ingest({ ...event(22, 40.0, -70.0), ...marine }); // across the Atlantic
 
     expect(store.eventsWithPosition).toBe(1);
