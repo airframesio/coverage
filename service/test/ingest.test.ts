@@ -474,6 +474,15 @@ describe('restoring station coverage from a snapshot', () => {
     expect(store.getStationCoverage(61, '24h', 'aircraft')).toBeNull();
   });
 
+  it('uses the transport type saved in the snapshot, with no station metadata', () => {
+    store = new CoverageStore();
+
+    store.loadStationSnapshot('24h', [{ ...saved(62, 100), transportType: 'marine' }]);
+
+    expect(store.getStationCoverage(62, '24h', 'marine')!.totalMessages).toBe(100);
+    expect(store.getStationCoverage(62, '24h', 'aircraft')).toBeNull();
+  });
+
   it('does not take longer for busier stations', () => {
     store = new CoverageStore();
     const stations = [];

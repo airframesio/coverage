@@ -640,10 +640,15 @@ export class CoverageStore {
     const sw = this.stationWindows[wi];
     for (const s of stationData) {
       if (!s.stationId || !s.bearingSectors) continue;
-      // Determine transport type from station metadata
-      const meta = this.stationMap.get(s.stationId);
-      const tt: TransportType = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais')
-        ? 'marine' : 'aircraft';
+      // Snapshots name the transport type. Ones saved by older builds do not,
+      // and fall back to the station's metadata.
+      let tt: TransportType;
+      if (['aircraft', 'marine', 'sonde', 'space'].includes(s.transportType)) {
+        tt = s.transportType;
+      } else {
+        const meta = this.stationMap.get(s.stationId);
+        tt = (meta?.sourceType === 'aiscatcher' || meta?.sourceType === 'ais') ? 'marine' : 'aircraft';
+      }
       sw.restore(s.stationId, tt, {
         sectorMaxDist: s.bearingSectors,
         sectorMsgCount: s.sectorMessageCounts ?? [],

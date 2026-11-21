@@ -2,12 +2,15 @@ import { getPool } from './database.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
 import { WINDOW_CONFIGS } from '../types/coverage.js';
 import { shouldMaintainResolution } from '../compute/h3-indexer.js';
+import type { TransportType } from '../types/events.js';
 import { jobStatus } from '../metrics/job-status.js';
 
 // Only persist windows >= 1h (short windows rebuild fast from live traffic)
 const PERSIST_WINDOW_NAMES = ['1h', '6h', '12h', '24h', '1w', '1mo'];
 // Only persist coarse resolutions (finer ones rebuild quickly)
 const PERSIST_RESOLUTIONS = [2, 3, 4];
+
+const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
 
 const SAVE_INTERVAL = 60_000; // Save every 60 seconds
 
@@ -20,16 +23,25 @@ async function replaceSnapshot(
   deleteSql: string, deleteParams: unknown[], insertSql: string, insertParams: unknown[],
 ): Promise<void> {
   const client = await getPool().connect();
+  // A checked-out client has no error listener of its own. A dropped
+  // connection emits 'error' as well as failing the query, and an unhandled
+  // 'error' event would take the process down.
+  let failure: Error | undefined;
+  const onError = (err: Error) => { failure = err; };
+  client.on('error', onError);
   try {
     await client.query('BEGIN');
     await client.query(deleteSql, deleteParams);
     await client.query(insertSql, insertParams);
     await client.query('COMMIT');
   } catch (err) {
+    failure = failure ?? (err instanceof Error ? err : new Error(String(err)));
     await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
-    client.release();
+    client.removeListener('error', onError);
+    // Passing the error makes the pool discard the client instead of reusing it
+    client.release(failure);
   }
 }
 
@@ -83,21 +95,26 @@ export class Persistence {
           saved++;
         }
 
-        // Save station coverage for this window
-        const stationCoverages = this.store.getAllStationCoverage(windowName);
-        if (stationCoverages.length > 0) {
-          const stationData = stationCoverages.map(cov => ({
-            stationId: cov.stationId,
-            bearingSectors: Array.from(cov.bearingSectors),
-            sectorMessageCounts: Array.from(cov.sectorMessageCounts),
-            sectorAvgLevels: Array.from(cov.sectorAvgLevels),
-            totalMessages: cov.totalMessages,
-            messagesWithPosition: cov.messagesWithPosition,
-            maxDistance: cov.maxDistance,
-            avgLevel: cov.avgLevel,
-            errorRate: cov.errorRate,
-          }));
-
+        // Save station coverage for this window, per transport type, so a
+        // restore does not depend on station metadata being available
+        const stationData: unknown[] = [];
+        for (const transportType of TRANSPORT_TYPES) {
+          for (const cov of this.store.getAllStationCoverage(windowName, transportType)) {
+            stationData.push({
+              stationId: cov.stationId,
+              transportType,
+              bearingSectors: Array.from(cov.bearingSectors),
+              sectorMessageCounts: Array.from(cov.sectorMessageCounts),
+              sectorAvgLevels: Array.from(cov.sectorAvgLevels),
+              totalMessages: cov.totalMessages,
+              messagesWithPosition: cov.messagesWithPosition,
+              maxDistance: cov.maxDistance,
+              avgLevel: cov.avgLevel,
+              errorRate: cov.errorRate,
+            });
+          }
+        }
+        if (stationData.length > 0) {
           await replaceSnapshot(
             `DELETE FROM coverage_snapshots
              WHERE snapshot_type = 'stations' AND window_name = $1`,
