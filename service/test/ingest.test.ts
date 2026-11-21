@@ -338,4 +338,14 @@ describe('stations without an owner-entered location', () => {
     expect(store.stationMap.get(44)!.locationSource).toBe('heard');
     expect(store.eventsWithPosition).toBe(1);
   });
+  it('leaves a station alone when the centre is not clearly away from the registered spot', () => {
+    store = new CoverageStore();
+    // Registered about 270 km from the centre of vessels spread over about 150 km
+    store.stationMap.set(45, { ...milan(45, false), latitude: 54.0, longitude: -6.4,
+      registeredLatitude: 54.0, registeredLongitude: -6.4 });
+
+    hear(45, 60, 51.6, -7.0, 1.8);
+
+    expect(store.stationMap.get(45)!.locationSource).toBe('registered');
+  });
 });

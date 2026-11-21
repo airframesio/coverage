@@ -37,8 +37,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
 - A station whose location nobody entered only has a GeoIP guess (the provider's
   city, often hundreds of km off). Such a station is placed at the centre of the
   positions it hears (median of the last 200) once those form one group no wider
-  than the radio's range and the centre is further from the registered spot than
-  the group is wide (at least 100 km): src/compute/heard-location.ts and
+  than the radio's range and the centre is at least twice as far from the
+  registered spot as the group is wide (at least 100 km; a placed station stays
+  placed until the centre is back within one width): src/compute/heard-location.ts and
   `placeByHeard` in the store. Owner-entered locations (`userLatitude` in the main
   API) are never moved. Station responses carry `locationSource` (`registered` or
   `heard`), health reports `stationsPlacedByHeard`, and the estimates are saved
