@@ -45,6 +45,54 @@ coverageRoutes.get('/h3', (c) => {
   });
 });
 
+const MARINE_SOURCE_TYPES = new Set(['aiscatcher', 'ais']);
+
+/**
+ * GET /api/v1/coverage/polygons — Every station's coverage polygon in one
+ * answer, for the map's polygon view (it used to make one request per station
+ * every 10 s). Built in one pass over the window, like the station list.
+ */
+coverageRoutes.get('/polygons', (c) => {
+  const store = c.get('store');
+  const windowName = c.req.query('window') ?? '1h';
+  const transportRaw = c.req.query('transport');
+  const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
+  const transportFilter = transportRaw && validTransports.includes(transportRaw)
+    ? transportRaw as TransportType
+    : undefined;
+
+  if (!WINDOW_CONFIGS.find(w => w.name === windowName)) {
+    return c.json({ error: `Invalid window: ${windowName}` }, 400);
+  }
+
+  const counts = store.getStationMessageCounts(windowName);
+  const polygons = [];
+  for (const coverage of store.getAllStationCoverage(windowName, transportFilter)) {
+    const station = store.stationMap.get(coverage.stationId);
+    if (!station) continue;
+    if (station.latitude === 0 && station.longitude === 0) continue;
+    if (transportFilter === 'aircraft' && MARINE_SOURCE_TYPES.has(station.sourceType)) continue;
+    if (transportFilter === 'marine' && !MARINE_SOURCE_TYPES.has(station.sourceType)) continue;
+    const messageCount = counts.get(coverage.stationId)?.messageCount ?? 0;
+    if (messageCount === 0) continue;
+
+    const polygon = buildCoveragePolygon(station.latitude, station.longitude, coverage);
+    if (!polygon) continue;
+    polygons.push({
+      stationId: coverage.stationId,
+      ident: station.ident,
+      sourceType: station.sourceType,
+      messageCount,
+      messagesWithPosition: coverage.messagesWithPosition,
+      confidence: coverage.confidence,
+      coordinates: polygon.geometry.coordinates,
+    });
+  }
+  polygons.sort((a, b) => b.messagesWithPosition - a.messagesWithPosition);
+
+  return c.json({ window: windowName, count: polygons.length, polygons });
+});
+
 /** GET /api/v1/coverage/stations/:id — Single station directional coverage */
 coverageRoutes.get('/stations/:id', (c) => {
   const store = c.get('store');

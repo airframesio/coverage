@@ -129,49 +129,25 @@ export default function CoverageMap() {
     } catch { /* retry next interval */ }
   }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
 
+  // One request for every station's polygon (the service builds them in one pass)
   const fetchPolygons = useCallback(async () => {
-    const MARINE_TYPES = new Set(['aiscatcher', 'ais']);
-
-    const withPosition = stations
-      .filter((s) => {
-        if (s.latitude === 0 && s.longitude === 0) return false;
-        if (s.messagesWithPosition <= 0) return false;
-        if (transportFilter === 'aircraft' && MARINE_TYPES.has(s.sourceType)) return false;
-        if (transportFilter === 'marine' && !MARINE_TYPES.has(s.sourceType)) return false;
-        return true;
-      })
-      // Sort by messagesWithPosition so stations with most polygon data are fetched first
-      .sort((a, b) => b.messagesWithPosition - a.messagesWithPosition);
-
-    const polygons: CoveragePolygon[] = [];
-
-    await Promise.allSettled(
-      withPosition.map(async (station) => {
-        try {
-          const p = new URLSearchParams({ window: timeWindow });
-          if (transportFilter !== 'all') p.set('transport', transportFilter);
-          const res = await fetch(
-            `${API_URL}/api/v1/coverage/stations/${station.id}?${p}`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            if (data.polygon?.geometry?.coordinates) {
-              polygons.push({
-                stationId: station.id,
-                ident: data.ident,
-                coordinates: data.polygon.geometry.coordinates,
-                confidence: data.confidence || 0.5,
-                messageCount: data.messageCount,
-                sourceType: data.sourceType,
-              });
-            }
-          }
-        } catch { /* skip */ }
-      })
-    );
-
-    setPolygonData(polygons);
-  }, [stations, timeWindow, transportFilter, setPolygonData]);
+    try {
+      const params = new URLSearchParams({ window: timeWindow });
+      if (transportFilter !== 'all') params.set('transport', transportFilter);
+      const res = await fetch(`${API_URL}/api/v1/coverage/polygons?${params}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const polygons: CoveragePolygon[] = (data.polygons ?? []).map((p: CoveragePolygon) => ({
+        stationId: p.stationId,
+        ident: p.ident,
+        coordinates: p.coordinates,
+        confidence: p.confidence || 0.5,
+        messageCount: p.messageCount,
+        sourceType: p.sourceType,
+      }));
+      setPolygonData(polygons);
+    } catch { /* retry next interval */ }
+  }, [timeWindow, transportFilter, setPolygonData]);
 
   const fetchStations = useCallback(async () => {
     try {
@@ -198,12 +174,10 @@ export default function CoverageMap() {
     fetchStations();
   }, [fetchCoverage, fetchStations]);
 
-  // Fetch polygons when mode switches to polygon or stations update
+  // Fetch polygons when the view switches to polygons or the window/filter changes
   useEffect(() => {
-    if (mode === 'polygon' && stations.length > 0) {
-      fetchPolygons();
-    }
-  }, [mode, stations, fetchPolygons]);
+    if (mode === 'polygon') fetchPolygons();
+  }, [mode, fetchPolygons]);
 
   // Periodic silent refresh
   useEffect(() => {
