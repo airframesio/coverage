@@ -59,8 +59,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   takes in events, and every open map polls them. Health is never cached.
   Anything that builds a list over all stations must do it in one pass over the
   window slices (`allStationCoverage`), never one scan per station, and a
-  single-station route must look up only that station (`getStationMessageCount`):
-  the map's polygon view requests every station's coverage every 10 s.
+  single-station route must look up only that station (`getStationMessageCount`).
+  The map's polygon view asks `/api/v1/coverage/polygons` (every station's
+  polygon in one answer) every 10 s; it used to make one request per station.
   `coverage_http_requests_total` / `coverage_http_request_duration_seconds`
   (labels route, status, cache) show which requests keep the thread busy.
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The

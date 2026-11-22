@@ -4,6 +4,7 @@ import { Counter, Histogram, type Registry } from 'prom-client';
 /** Fixed route names, so the label set stays small whatever clients ask for */
 export function routeName(path: string): string {
   if (path === '/api/v1/coverage/h3') return 'coverage_h3';
+  if (path === '/api/v1/coverage/polygons') return 'coverage_polygons';
   if (path.startsWith('/api/v1/coverage/stations/')) return 'coverage_station';
   if (path === '/api/v1/stations' || path === '/api/v1/stations/') return 'stations';
   if (path === '/api/v1/stats') return 'stats';
