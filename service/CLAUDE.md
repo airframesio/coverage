@@ -54,11 +54,15 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   the samples themselves are not saved, so an unplaced station starts counting
   again at a restart.
 - Hono REST API on port 3002. Answers under `/api/v1/coverage`, `/api/v1/stations`
-  (10 s) and `/api/v1/stats` (5 s) are kept and shared between callers asking the
+  (10 s), `/api/v1/stats` and `/api/v1/activity` (5 s) are kept and shared between callers asking the
   same question (src/api/response-cache.ts): they are computed on the thread that
   takes in events, and every open map polls them. Health is never cached.
   Anything that builds a list over all stations must do it in one pass over the
-  window slices (`allStationCoverage`), never one scan per station.
+  window slices (`allStationCoverage`), never one scan per station, and a
+  single-station route must look up only that station (`getStationMessageCount`):
+  the map's polygon view requests every station's coverage every 10 s.
+  `coverage_http_requests_total` / `coverage_http_request_duration_seconds`
+  (labels route, status, cache) show which requests keep the thread busy.
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
   port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`
   or `X-Monitoring-Token` and answers 401 when the variable is unset. Every value

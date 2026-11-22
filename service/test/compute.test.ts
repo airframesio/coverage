@@ -44,3 +44,15 @@ describe('coordinate validation', () => {
     expect(validateCoordinate(0.01, 0.01).reason).toContain('null island');
   });
 });
+
+describe('range limits', () => {
+  it('keeps VHF positions out to line of sight plus margin', async () => {
+    const { isPlausibleRange } = await import('../src/validation/signal-validator.js');
+    expect(isPlausibleRange('dumpvdl2', 590)).toBe(true);
+    expect(isPlausibleRange('dumpvdl2', 610)).toBe(false);
+    expect(isPlausibleRange('acarsdec', 770)).toBe(true);
+    expect(isPlausibleRange('acarsdec', 790)).toBe(false);
+    expect(isPlausibleRange('ais', 290)).toBe(true);
+    expect(isPlausibleRange('ais', 310)).toBe(false);
+  });
+});

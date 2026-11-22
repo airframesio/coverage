@@ -65,9 +65,8 @@ coverageRoutes.get('/stations/:id', (c) => {
     return c.json({ error: 'Station not found' }, 404);
   }
 
-  // Window-scoped message counts from H3 sliding windows
-  const windowCounts = store.getStationMessageCounts(windowName);
-  const windowData = windowCounts.get(stationId);
+  // Window-scoped message count for this station only
+  const windowData = store.getStationMessageCount(stationId, windowName);
 
   if (!windowData || windowData.messageCount === 0) {
     return c.json({ error: 'No coverage data for this station in this window' }, 404);

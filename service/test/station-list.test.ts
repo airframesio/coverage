@@ -78,3 +78,26 @@ describe('response cache', () => {
     expect((await app.request('/x')).status).toBe(200);
   });
 });
+
+describe('one station\'s message count', () => {
+  it('matches the whole-list figure and stays cheap with many stations', async () => {
+    const { CoverageStore } = await import('../src/aggregation/coverage-store.js');
+    const store = new CoverageStore();
+    const sw = (store as unknown as { stationWindows: StationSlidingWindow[] }).stationWindows;
+    for (let id = 1; id <= 1500; id++) {
+      for (const w of sw) w.record(id, id % 36, id % 400, -10, true, false, id % 3 ? 'aircraft' : 'marine');
+    }
+    sw[0].record(7, 2, 900, -10, true, false, 'aircraft'); // the 1m window can hold more than the asked one
+    for (const window of ['1h', '24h']) {
+      const all = store.getStationMessageCounts(window);
+      for (const id of [1, 7, 1500]) expect(store.getStationMessageCount(id, window)).toEqual(all.get(id));
+    }
+    expect(store.getStationMessageCount(99999, '24h')).toBeNull();
+
+    const start = performance.now();
+    for (let id = 1; id <= 1500; id++) store.getStationMessageCount(id, '24h');
+    // One request per station, as the map's polygon view makes them
+    expect(performance.now() - start).toBeLessThan(500);
+    store.destroy();
+  });
+});
