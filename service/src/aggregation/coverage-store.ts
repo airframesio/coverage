@@ -1,5 +1,5 @@
 import {
-  SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellStationIds, cellTransportTypes,
+  SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellHasFamily, cellStationIds, cellTransportTypes,
   cellHasTransport, addCellSource, addCellStation, addCellTransport,
 } from './sliding-window.js';
 import { StationSlidingWindow } from './station-window.js';
@@ -10,7 +10,7 @@ import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
-import { sourceFamily } from '../compute/source-family.js';
+import { sourceFamily, type SourceFamily } from '../compute/source-family.js';
 import {
   HeardLocationEstimator, AIRCRAFT_PROFILE, MARINE_PROFILE, type HeardLocation,
 } from '../compute/heard-location.js';
@@ -452,6 +452,8 @@ export class CoverageStore {
     windowName: string,
     opts?: {
       transportType?: TransportType;
+      /** Radio families to keep; undefined keeps every cell */
+      modes?: ReadonlySet<SourceFamily>;
       bounds?: { swLat: number; swLon: number; neLat: number; neLon: number };
       minConfidence?: number;
     },
@@ -470,6 +472,7 @@ export class CoverageStore {
       if (opts?.transportType) {
         if (!cellHasTransport(cell, opts.transportType)) continue;
       }
+      if (opts?.modes && !cellHasFamily(cell, opts.modes)) continue;
 
       const confidence = computeConfidence(cell);
 
@@ -572,7 +575,7 @@ export class CoverageStore {
    * Always measured on the resolution 3 grid (cells about 110 km across) so
    * the figure does not depend on which resolution a client happens to load.
    */
-  getCoverageAreaKm2(windowName: string, transportType?: TransportType): number {
+  getCoverageAreaKm2(windowName: string, transportType?: TransportType, modes?: ReadonlySet<SourceFamily>): number {
     const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === AREA_RESOLUTION);
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (ri === -1 || wi === -1) return 0;
@@ -581,6 +584,7 @@ export class CoverageStore {
     for (const [h3, cell] of this.aggregated(ri, wi)) {
       if (cell.messageCount === 0) continue;
       if (transportType && !cellHasTransport(cell, transportType)) continue;
+      if (modes && !cellHasFamily(cell, modes)) continue;
       area += cellArea(h3, 'km2');
     }
     return Math.round(area);

@@ -38,3 +38,23 @@ export function sourceFamily(sourceType: string | null | undefined): SourceFamil
   if (key.startsWith('ais')) return 'ais';
   return 'unknown';
 }
+
+/** The radio families a client can pick from, in display order */
+export const MODE_FAMILIES = ['acars', 'vdl', 'hfdl', 'satcom', 'ais'] as const;
+export type ModeFamily = typeof MODE_FAMILIES[number];
+
+/**
+ * Parse a `modes` query value (`acars,vdl`) into a set of families.
+ * Missing, empty or naming every family means no filter (undefined).
+ * Unknown names are ignored; a value naming only unknown ones matches nothing.
+ */
+export function parseModes(raw: string | null | undefined): Set<SourceFamily> | undefined {
+  if (raw === undefined || raw === null || raw.trim() === '') return undefined;
+  const modes = new Set<SourceFamily>();
+  for (const part of raw.split(',')) {
+    const name = part.trim().toLowerCase();
+    if ((MODE_FAMILIES as readonly string[]).includes(name)) modes.add(name as SourceFamily);
+  }
+  if (MODE_FAMILIES.every(f => modes.has(f))) return undefined;
+  return modes;
+}

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import type { AppContext } from '../server.js';
 import type { TransportType } from '../../types/events.js';
+import { parseModes, sourceFamily } from '../../compute/source-family.js';
 
 export const stationRoutes = new Hono<AppContext>();
 
@@ -16,6 +17,7 @@ stationRoutes.get('/', (c) => {
   const transportFilter = transportRaw && validTransports.includes(transportRaw)
     ? transportRaw as TransportType
     : undefined;
+  const modes = parseModes(c.req.query('modes'));
 
   const windowCounts = store.getStationMessageCounts(windowName);
   const allCoverage = store.getAllStationCoverage(windowName, transportFilter);
@@ -32,6 +34,7 @@ stationRoutes.get('/', (c) => {
     // Filter stations by transport type based on their source type
     if (transportFilter === 'aircraft' && MARINE_SOURCE_TYPES.has(meta.sourceType)) continue;
     if (transportFilter === 'marine' && !MARINE_SOURCE_TYPES.has(meta.sourceType)) continue;
+    if (modes && !modes.has(sourceFamily(meta.sourceType))) continue;
 
     const cov = coverageByStation.get(stationId);
 

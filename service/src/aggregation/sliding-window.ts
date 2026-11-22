@@ -1,5 +1,6 @@
 import type { CellAggregation, WindowConfig } from '../types/coverage.js';
 import type { TransportType } from '../types/events.js';
+import { sourceFamily, type SourceFamily } from '../compute/source-family.js';
 
 const TRANSPORT_BITS: Record<TransportType, number> = {
   aircraft: 1,
@@ -11,6 +12,8 @@ const TRANSPORT_NAMES = Object.keys(TRANSPORT_BITS) as TransportType[];
 
 /** Source type names seen so far. A name's position is its bit in a cell's mask. */
 const sourceNames: string[] = [];
+/** Radio family of each source bit, by bit position */
+const sourceFamilies: SourceFamily[] = [];
 const sourceBits = new Map<string, number>();
 const MAX_SOURCE_BITS = 31;
 const OTHER_SOURCE = 'other';
@@ -20,7 +23,10 @@ function sourceBit(sourceType: string): number {
   if (bit === undefined) {
     // Bitwise operators work on 32 bits. Past 30 distinct names, share the last bit.
     const index = sourceNames.length < MAX_SOURCE_BITS - 1 ? sourceNames.length : MAX_SOURCE_BITS - 1;
-    if (index === sourceNames.length) sourceNames.push(index === MAX_SOURCE_BITS - 1 ? OTHER_SOURCE : sourceType);
+    if (index === sourceNames.length) {
+      sourceNames.push(index === MAX_SOURCE_BITS - 1 ? OTHER_SOURCE : sourceType);
+      sourceFamilies.push(index === MAX_SOURCE_BITS - 1 ? 'unknown' : sourceFamily(sourceType));
+    }
     bit = 1 << index;
     sourceBits.set(sourceType, bit);
   }
@@ -62,6 +68,19 @@ export function addCellSource(cell: CellAggregation, sourceType: string): void {
   const bit = sourceBit(sourceType);
   cell.sources |= bit;
   if (cell.primarySource === 0) cell.primarySource = 32 - Math.clz32(bit);
+}
+
+/**
+ * Whether any source recorded in a cell belongs to one of `families`.
+ * A cell keeps one set of totals for all its sources, so a filtered cell is
+ * shown with the totals of every source that heard it.
+ */
+export function cellHasFamily(cell: CellAggregation, families: ReadonlySet<SourceFamily>): boolean {
+  const mask = cell.sources;
+  for (let i = 0; i < sourceFamilies.length; i++) {
+    if (mask & (1 << i) && families.has(sourceFamilies[i])) return true;
+  }
+  return false;
 }
 
 /** Station ids recorded in a cell */
