@@ -97,6 +97,8 @@ export class CoverageStore {
   private heardApplied = new Set<number>();
   /** How many times a station was moved to, or back from, where it is heard */
   public stationsRelocated = 0;
+  /** See stationSectorsRevision() */
+  private sectorsRevision = 0;
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
@@ -354,6 +356,7 @@ export class CoverageStore {
 
     if (recomputed) {
       for (const sw of new Set(this.stationWindows)) sw.clearSectors(event.stationId);
+      this.sectorsRevision++;
       this.outOfRangeByStation.delete(event.stationId);
       this.stationsRelocated++;
     }
@@ -540,10 +543,20 @@ export class CoverageStore {
    * Put one saved slice of station totals back at its age. Returns whether it
    * went into the current slice, or null when it is older than the window.
    */
-  loadStationSlice(windowName: string, startedAt: number, entries: SavedStationSliceEntry[]): boolean | null {
+  loadStationSlice(
+    windowName: string, startedAt: number, entries: SavedStationSliceEntry[], now = Date.now(),
+  ): boolean | null {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1 || !this.stationWindows[wi]) return null;
-    return this.stationWindows[wi].importSlice(startedAt, entries);
+    return this.stationWindows[wi].importSlice(startedAt, entries, now);
+  }
+
+  /**
+   * Goes up each time a moved station's range and direction are cleared. That
+   * changes closed station slices too, so they have to be saved again.
+   */
+  stationSectorsRevision(): number {
+    return this.sectorsRevision;
   }
 
   /** Get station coverage data for a specific station and window (sliding window scoped) */
@@ -702,7 +715,9 @@ export class CoverageStore {
    * the current slice. Returns whether it went into the current slice, or null
    * when it was not loaded (older than the window, or not kept for it).
    */
-  loadH3Snapshot(windowName: string, resolution: number, cells: CellResponse[], startedAt?: number): boolean | null {
+  loadH3Snapshot(
+    windowName: string, resolution: number, cells: CellResponse[], startedAt?: number, now = Date.now(),
+  ): boolean | null {
     const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (ri === -1 || wi === -1) return null;
@@ -715,7 +730,7 @@ export class CoverageStore {
     let slice = window.current;
     let current = true;
     if (startedAt !== undefined) {
-      const target = window.sliceFor(startedAt);
+      const target = window.sliceFor(startedAt, now);
       if (!target) return null;
       slice = target.slice;
       current = target.current;

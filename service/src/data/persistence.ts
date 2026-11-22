@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { getPool } from './database.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
 import { WINDOW_CONFIGS } from '../types/coverage.js';
@@ -48,14 +49,13 @@ const SAVE_INTERVALS = new Map<string, number>([
   [HEARD_LOCATIONS, 5 * 60_000],
 ]);
 
+type Client = PoolClient;
+
 /**
- * Replace one snapshot. The delete and the insert are one transaction, so a
- * connection cut between them (a restart during a save) leaves the old snapshot
- * in place instead of none.
+ * Run `work` in one transaction, so a connection cut part way (a restart
+ * during a save) leaves the snapshots as they were instead of half replaced.
  */
-async function replaceSnapshot(
-  deleteSql: string, deleteParams: unknown[], insertSql: string, insertParams: unknown[],
-): Promise<void> {
+async function inTransaction(work: (client: Client) => Promise<void>): Promise<void> {
   const client = await getPool().connect();
   // A checked-out client has no error listener of its own. A dropped
   // connection emits 'error' as well as failing the query, and an unhandled
@@ -65,10 +65,8 @@ async function replaceSnapshot(
   client.on('error', onError);
   try {
     await client.query('BEGIN');
-    await client.query(deleteSql, deleteParams);
-    await client.query(insertSql, insertParams);
+    await work(client);
     await client.query('COMMIT');
-    for (const param of insertParams) if (typeof param === 'string') jobStatus.snapshotBytesWritten += param.length;
   } catch (err) {
     failure = failure ?? (err instanceof Error ? err : new Error(String(err)));
     await client.query('ROLLBACK').catch(() => {});
@@ -79,6 +77,18 @@ async function replaceSnapshot(
     client.release(failure);
   }
 }
+
+/** Replace one snapshot: the delete and the insert are one transaction */
+async function replaceSnapshot(
+  deleteSql: string, deleteParams: unknown[], insertSql: string, insertParams: unknown[],
+): Promise<void> {
+  await inTransaction(async client => {
+    await client.query(deleteSql, deleteParams);
+    await client.query(insertSql, insertParams);
+  });
+  for (const param of insertParams) if (typeof param === 'string') jobStatus.snapshotBytesWritten += param.length;
+}
+
 
 /**
  * Periodically persists H3 cell data and station coverage to PostgreSQL
@@ -91,6 +101,8 @@ export class Persistence {
   private saving = false;
   /** Closed slices already saved in their final form: `type|window|resolution|startedAt` */
   private writtenSlices = new Set<string>();
+  /** The store's sectors revision at each window's last station save */
+  private savedSectorsRevision = new Map<string, number>();
 
   constructor(store: CoverageStore) {
     this.store = store;
@@ -107,49 +119,55 @@ export class Persistence {
     type: string, windowName: string, resolution: number,
     slices: { startedAt: number; current: boolean; data: unknown[] }[],
   ): Promise<number> {
-    let saved = 0;
     const prefix = `${type}|${windowName}|${resolution}|`;
     const keep: number[] = [];
     const written = new Set<string>();
+    const rows: { startedAt: number; json: string }[] = [];
     for (const sl of slices) {
       if (sl.data.length === 0) continue;
       keep.push(sl.startedAt);
       const key = prefix + sl.startedAt;
-      if (!sl.current && this.writtenSlices.has(key)) {
-        written.add(key);
-        continue;
-      }
-      await replaceSnapshot(
-        `DELETE FROM coverage_snapshots
-         WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3 AND slice_started_at = $4`,
-        [type, windowName, resolution, sl.startedAt],
-        `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, slice_started_at, data)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [type, windowName, resolution, sl.startedAt, JSON.stringify(sl.data)],
-      );
       if (!sl.current) written.add(key);
-      saved++;
+      if (!sl.current && this.writtenSlices.has(key)) continue;
+      rows.push({ startedAt: sl.startedAt, json: JSON.stringify(sl.data) });
     }
-    // Forget this window's other keys; they are about to be deleted
+
+    // One transaction for the window: until every slice is in, the rows saved
+    // before (or the whole-window snapshot of an older build) stay complete.
+    await inTransaction(async client => {
+      for (const row of rows) {
+        await client.query(
+          `DELETE FROM coverage_snapshots
+           WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3 AND slice_started_at = $4`,
+          [type, windowName, resolution, row.startedAt],
+        );
+        await client.query(
+          `INSERT INTO coverage_snapshots (snapshot_type, window_name, resolution, slice_started_at, data)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [type, windowName, resolution, row.startedAt, row.json],
+        );
+      }
+      await client.query(
+        `DELETE FROM coverage_snapshots
+         WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3
+           AND NOT (slice_started_at = ANY($4::bigint[]))`,
+        [type, windowName, resolution, keep],
+      );
+      // The whole-window snapshot of an older build is covered from now on
+      if (keep.length > 0) {
+        await client.query(
+          `DELETE FROM coverage_snapshots
+           WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3`,
+          [LEGACY_TYPE[type], windowName, resolution],
+        );
+      }
+    });
+
+    // Only once committed: this window's other keys are deleted rows now
     for (const key of this.writtenSlices) if (key.startsWith(prefix)) this.writtenSlices.delete(key);
     for (const key of written) this.writtenSlices.add(key);
-
-    const db = getPool();
-    await db.query(
-      `DELETE FROM coverage_snapshots
-       WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3
-         AND NOT (slice_started_at = ANY($4::bigint[]))`,
-      [type, windowName, resolution, keep],
-    );
-    // The whole-window snapshot of an older build is covered from now on
-    if (keep.length > 0) {
-      await db.query(
-        `DELETE FROM coverage_snapshots
-         WHERE snapshot_type = $1 AND window_name = $2 AND resolution = $3`,
-        [LEGACY_TYPE[type], windowName, resolution],
-      );
-    }
-    return saved;
+    for (const row of rows) jobStatus.snapshotBytesWritten += row.json.length;
+    return rows.length;
   }
 
   start(): void {
@@ -193,9 +211,18 @@ export class Persistence {
         // entries of an older whole-window snapshot wait for station metadata,
         // that snapshot is the only complete copy: leave it alone until then.
         if (!this.store.hasPendingStationSnapshots()) {
+          // A moved station's range and direction were cleared in every slice,
+          // closed ones included: write those again
+          const revision = this.store.stationSectorsRevision();
+          const last = this.savedSectorsRevision.get(windowName);
+          if (last !== undefined && last !== revision) {
+            const prefix = `${STATIONS_SLICE}|${windowName}|0|`;
+            for (const key of this.writtenSlices) if (key.startsWith(prefix)) this.writtenSlices.delete(key);
+          }
           const slices = this.store.getStationSlices(windowName)
             .map(sl => ({ startedAt: sl.startedAt, current: sl.current, data: sl.entries }));
           saved += await this.saveSlices(STATIONS_SLICE, windowName, 0, slices);
+          this.savedSectorsRevision.set(windowName, revision);
         }
         this.lastSaved.set(windowName, startedAt);
       }
@@ -244,14 +271,17 @@ export class Persistence {
       let h3Loaded = 0;
       let stationsLoaded = 0;
       const sliced = new Set<string>();
+      // One reference time for every row, so two saved slices never meet in
+      // one slot because a slice boundary passed between them
+      const now = Date.now();
       for (const row of sliceResult.rows) {
         const data = row.data;
         if (!Array.isArray(data) || data.length === 0) continue;
         const startedAtMs = Number(row.slice_started_at);
         const resolution = Number(row.resolution);
         const current = row.snapshot_type === H3_SLICE
-          ? this.store.loadH3Snapshot(row.window_name, resolution, data, startedAtMs)
-          : this.store.loadStationSlice(row.window_name, startedAtMs, data);
+          ? this.store.loadH3Snapshot(row.window_name, resolution, data, startedAtMs, now)
+          : this.store.loadStationSlice(row.window_name, startedAtMs, data, now);
         if (current === null) continue;
         if (row.snapshot_type === H3_SLICE) h3Loaded += data.length;
         else stationsLoaded += data.length;

@@ -294,8 +294,8 @@ export class StationSlidingWindow {
    * Put a saved slice back at its age. Returns whether it went into the
    * current slice, or null when it is older than the window.
    */
-  importSlice(startedAt: number, entries: SavedStationSliceEntry[]): boolean | null {
-    const target = this.sliceFor(startedAt);
+  importSlice(startedAt: number, entries: SavedStationSliceEntry[], now = Date.now()): boolean | null {
+    const target = this.sliceFor(startedAt, now);
     if (!target) return null;
     for (const e of entries) {
       if (!Number.isInteger(e.stationId) || !TRANSPORT_TYPES.includes(e.transportType)) continue;
