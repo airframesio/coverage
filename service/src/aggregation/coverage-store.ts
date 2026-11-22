@@ -8,6 +8,9 @@ import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
 import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
+
+/** South of this no sea can be reached (the Ross Sea ends at about 78.5° S) */
+const SOUTHERNMOST_SEA_LAT = -79;
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
 import { sourceFamily, type SourceFamily } from '../compute/source-family.js';
@@ -155,6 +158,10 @@ export class CoverageStore {
       const targetCheck = validateCoordinate(event.targetLat, event.targetLon);
       if (!targetCheck.valid) {
         this.discardPosition('invalid_coordinate');
+      } else if (event.transportType === 'marine' && event.targetLat < SOUTHERNMOST_SEA_LAT) {
+        // Inland ice: no ship gets there. Imported AIS feeds pass on corrupt
+        // fixes, and an importer has no location to range-check them against.
+        this.discardPosition('marine_on_ice');
       } else {
         const sigCheck = validateSignal(
           event.sourceType,

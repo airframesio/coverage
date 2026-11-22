@@ -24,6 +24,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   See `WINDOW_CONFIGS` / `H3_RESOLUTION_CONFIGS` in src/types/coverage.ts. A request
   for a finer grid than a window keeps is answered at the finest one it has.
 - "No position" arrives as latitude 0 / longitude 0 and is treated as missing
+- AIS positions south of 79° S (inland Antarctic ice, past the Ross Sea) are
+  dropped as `marine_on_ice`: imported feeds pass on corrupt fixes there and an
+  importer has no location to range-check them against
 - Stations flagged by the main API are accepted (the flag marks the busiest
   stations); blocked stations are rejected. `/api/v1/health` reports rejections
   and discarded positions by reason, and `cellsInMemory`.
