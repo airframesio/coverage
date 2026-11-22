@@ -2,15 +2,12 @@ import {
   SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellHasFamily, cellStationIds, cellTransportTypes,
   cellHasTransport, addCellSource, addCellStation, addCellTransport,
 } from './sliding-window.js';
-import { StationSlidingWindow } from './station-window.js';
+import { StationSlidingWindow, type SavedStationSliceEntry } from './station-window.js';
 import { cellArea } from 'h3-js';
 import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
 import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
 import { validateCoordinate } from '../validation/coordinate-validator.js';
-
-/** South of this no sea can be reached (the Ross Sea ends at about 78.5° S) */
-const SOUTHERNMOST_SEA_LAT = -79;
 import { validateSignal, isPlausibleRange } from '../validation/signal-validator.js';
 import { checkStationTrust } from '../validation/station-trust.js';
 import { sourceFamily, type SourceFamily } from '../compute/source-family.js';
@@ -29,6 +26,26 @@ const HEARD_MOVE_KM = 25;
 
 /** Grid used for coverage area figures */
 const AREA_RESOLUTION = 3;
+
+/** A cell as the API and snapshots give it */
+function cellResponse(h3: string, cell: CellAggregation, confidence: number): CellResponse {
+  const stationIds = cellStationIds(cell);
+  return {
+    h3,
+    msgCount: cell.messageCount,
+    avgLevel: cell.totalLevel !== 0 ? Math.round(cell.totalLevel / cell.messageCount * 10) / 10 : null,
+    maxDistance: Math.round(cell.maxDistance * 10) / 10,
+    errorRate: Math.round((cell.errorMessages / cell.messageCount) * 1000) / 1000,
+    confidence,
+    sources: cellSources(cell),
+    stationCount: stationIds.length,
+    stationIds,
+    transportTypes: cellTransportTypes(cell),
+  };
+}
+
+/** South of this no sea can be reached (the Ross Sea ends at about 78.5° S) */
+const SOUTHERNMOST_SEA_LAT = -79;
 
 /**
  * Main in-memory coverage data store.
@@ -80,6 +97,8 @@ export class CoverageStore {
   private heardApplied = new Set<number>();
   /** How many times a station was moved to, or back from, where it is heard */
   public stationsRelocated = 0;
+  /** See stationSectorsRevision() */
+  private sectorsRevision = 0;
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
@@ -337,6 +356,7 @@ export class CoverageStore {
 
     if (recomputed) {
       for (const sw of new Set(this.stationWindows)) sw.clearSectors(event.stationId);
+      this.sectorsRevision++;
       this.outOfRangeByStation.delete(event.stationId);
       this.stationsRelocated++;
     }
@@ -486,22 +506,57 @@ export class CoverageStore {
       // Min confidence filter
       if (opts?.minConfidence && confidence < opts.minConfidence) continue;
 
-      const stationIds = cellStationIds(cell);
-      results.push({
-        h3,
-        msgCount: cell.messageCount,
-        avgLevel: cell.totalLevel !== 0 ? Math.round(cell.totalLevel / cell.messageCount * 10) / 10 : null,
-        maxDistance: Math.round(cell.maxDistance * 10) / 10,
-        errorRate: Math.round((cell.errorMessages / cell.messageCount) * 1000) / 1000,
-        confidence,
-        sources: cellSources(cell),
-        stationCount: stationIds.length,
-        stationIds,
-        transportTypes: cellTransportTypes(cell),
-      });
+      results.push(cellResponse(h3, cell, confidence));
     }
 
     return results;
+  }
+
+  /**
+   * A window's cells slice by slice, newest first, with each slice's start
+   * time, for snapshots. Views have no slices of their own (their owner's
+   * snapshot covers them) and answer nothing.
+   */
+  getH3Slices(resolution: number, windowName: string): { startedAt: number; current: boolean; cells: CellResponse[] }[] {
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1 || WINDOW_CONFIGS[wi].viewOf) return [];
+    const window = this.windows[ri][wi];
+    if (!window) return [];
+    return window.slicesByAge().map(({ startedAt, current, slice }) => {
+      const cells: CellResponse[] = [];
+      for (const [h3, cell] of slice) {
+        if (cell.messageCount > 0) cells.push(cellResponse(h3, cell, computeConfidence(cell)));
+      }
+      return { startedAt, current, cells };
+    });
+  }
+
+  /** A window's per-station totals slice by slice, newest first, for snapshots */
+  getStationSlices(windowName: string): { startedAt: number; current: boolean; entries: SavedStationSliceEntry[] }[] {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1 || !this.stationWindows[wi]) return [];
+    return this.stationWindows[wi].exportSlices();
+  }
+
+  /**
+   * Put one saved slice of station totals back at its age. Returns whether it
+   * went into the current slice, or null when it is older than the window.
+   */
+  loadStationSlice(
+    windowName: string, startedAt: number, entries: SavedStationSliceEntry[], now = Date.now(),
+  ): boolean | null {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1 || !this.stationWindows[wi]) return null;
+    return this.stationWindows[wi].importSlice(startedAt, entries, now);
+  }
+
+  /**
+   * Goes up each time a moved station's range and direction are cleared. That
+   * changes closed station slices too, so they have to be saved again.
+   */
+  stationSectorsRevision(): number {
+    return this.sectorsRevision;
   }
 
   /** Get station coverage data for a specific station and window (sliding window scoped) */
@@ -654,18 +709,32 @@ export class CoverageStore {
     };
   }
 
-  /** Load a persisted H3 snapshot into the current sliding window slice */
-  loadH3Snapshot(windowName: string, resolution: number, cells: CellResponse[]): void {
+  /**
+   * Load a persisted H3 snapshot. A per-slice snapshot (`startedAt` given) goes
+   * back into the slice of its age; an older whole-window snapshot goes into
+   * the current slice. Returns whether it went into the current slice, or null
+   * when it was not loaded (older than the window, or not kept for it).
+   */
+  loadH3Snapshot(
+    windowName: string, resolution: number, cells: CellResponse[], startedAt?: number, now = Date.now(),
+  ): boolean | null {
     const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
-    if (ri === -1 || wi === -1) return;
+    if (ri === -1 || wi === -1) return null;
     // Snapshots saved before a resolution was dropped for this window
-    if (!shouldMaintainResolution(resolution, wi)) return;
+    if (!shouldMaintainResolution(resolution, wi)) return null;
     // A view has no cells of its own; its owner's snapshot covers it.
-    if (WINDOW_CONFIGS[wi].viewOf) return;
+    if (WINDOW_CONFIGS[wi].viewOf) return null;
 
     const window = this.windows[ri][wi];
-    const slice = window.current;
+    let slice = window.current;
+    let current = true;
+    if (startedAt !== undefined) {
+      const target = window.sliceFor(startedAt, now);
+      if (!target) return null;
+      slice = target.slice;
+      current = target.current;
+    }
 
     for (const cell of cells) {
       const existing = slice.get(cell.h3);
@@ -685,6 +754,7 @@ export class CoverageStore {
       for (const tt of cell.transportTypes) addCellTransport(newCell, tt as TransportType);
       slice.set(cell.h3, newCell);
     }
+    return current;
   }
 
   /**

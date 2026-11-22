@@ -31,6 +31,12 @@ export async function migrate(): Promise<void> {
     )
   `);
 
+  // Per-slice snapshots: when the slice started (epoch ms). NULL on the older
+  // whole-window snapshots, which are still read once after an upgrade.
+  await db.query(`
+    ALTER TABLE coverage_snapshots ADD COLUMN IF NOT EXISTS slice_started_at BIGINT
+  `);
+
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_snapshots_type_window
     ON coverage_snapshots (snapshot_type, window_name)
