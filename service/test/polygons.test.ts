@@ -61,3 +61,18 @@ describe('GET /api/v1/coverage/polygons', () => {
     expect((await app.request('/api/v1/coverage/polygons?window=nope')).status).toBe(400);
   });
 });
+
+describe('compression', () => {
+  it('gzips answers for clients that accept it, cached ones included', async () => {
+    const plain = await (await app.request('/api/v1/coverage/polygons?window=1h')).json();
+    for (let i = 0; i < 2; i++) {
+      const res = await app.request('/api/v1/coverage/polygons?window=1h', { headers: { 'Accept-Encoding': 'gzip' } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-encoding')).toBe('gzip');
+      expect(res.headers.get('vary')).toContain('Accept-Encoding');
+      const body = await new Response(res.body!.pipeThrough(new DecompressionStream('gzip'))).json();
+      expect(body).toEqual(plain);
+    }
+    expect((await app.request('/api/v1/coverage/polygons?window=1h')).headers.get('content-encoding')).toBeNull();
+  });
+});

@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { compress } from 'hono/compress';
 import { coverageRoutes } from './routes/coverage.js';
 import { stationRoutes } from './routes/stations.js';
 import { healthRoutes } from './routes/health.js';
@@ -23,6 +24,11 @@ export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hon
 
   // Outermost, so cached answers are counted too
   app.use('*', requestMetrics(registry));
+
+  // gzip answers for clients that accept it (the polygon list is about 1 MB of
+  // JSON). Outside the response cache, so cached answers are compressed too and
+  // the cache keeps plain text. CompressionStream runs on libuv's pool.
+  app.use('*', compress());
 
   // CORS for frontend
   app.use('*', cors({
