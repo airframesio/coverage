@@ -21,7 +21,7 @@
     "clsx": "^2.1.1",
     "geist": "^1.9.2",
     "h3-js": "^4.5.0",
-    "lucide-react": "^1.73.0",
+    "lucide-react": "^1.76.0",
     "maplibre-gl": "^5.24.1",
     "next": "16.4.6",
     "react": "19.3.1",
