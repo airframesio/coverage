@@ -105,7 +105,9 @@ export function responseCache(ttlMs: number, now: () => number = Date.now): Midd
 
     await next();
 
-    if (c.res.status !== 200) return;
+    // Only plain answers are cached. One that is already encoded (another
+    // cache mounted on the same path) passes through untouched.
+    if (c.res.status !== 200 || c.res.headers.has('Content-Encoding')) return;
     const body = await c.res.clone().text();
     if (cache.size >= MAX_ENTRIES) {
       const time = now();
