@@ -545,6 +545,29 @@ export class CoverageStore {
   }
 
   /**
+   * The same figure as getStationMessageCounts, for one station. The map asks
+   * for every station's coverage one request at a time, so this must not walk
+   * every station's data.
+   */
+  getStationMessageCount(stationId: number, windowName: string): { messageCount: number; maxDistance: number } | null {
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (wi === -1) return null;
+    const own = this.stationWindows[wi].stationTotal(stationId);
+    let result = own ? { messageCount: own.totalMessages, maxDistance: own.maxDistance } : null;
+    for (let swi = 0; swi < wi; swi++) {
+      const totals = this.stationWindows[swi].stationTotal(stationId);
+      if (!totals) continue;
+      if (!result) {
+        result = { messageCount: totals.totalMessages, maxDistance: totals.maxDistance };
+      } else if (result.messageCount < totals.totalMessages) {
+        result.messageCount = totals.totalMessages;
+        result.maxDistance = Math.max(result.maxDistance, totals.maxDistance);
+      }
+    }
+    return result;
+  }
+
+  /**
    * Area of the cells with coverage in a window, in km².
    * Always measured on the resolution 3 grid (cells about 110 km across) so
    * the figure does not depend on which resolution a client happens to load.

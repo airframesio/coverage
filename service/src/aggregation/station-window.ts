@@ -289,6 +289,24 @@ export class StationSlidingWindow {
     }
   }
 
+  /** Message total and furthest reception of one station, by key lookup */
+  stationTotal(stationId: number): { totalMessages: number; maxDistance: number } | null {
+    const keys = TRANSPORT_TYPES.map(transportType => sliceKey(stationId, transportType));
+    let totalMessages = 0;
+    let maxDistance = 0;
+    for (const slice of this.slices) {
+      for (const key of keys) {
+        const data = slice.get(key);
+        if (!data || data.totalMessages === 0) continue;
+        totalMessages += data.totalMessages;
+        for (let i = 0; i < 36; i++) {
+          if (data.sectorMaxDist[i] > maxDistance) maxDistance = data.sectorMaxDist[i];
+        }
+      }
+    }
+    return totalMessages > 0 ? { totalMessages, maxDistance } : null;
+  }
+
   /** Message total and furthest reception per station across all slices, in one pass */
   stationTotals(): Map<number, { totalMessages: number; maxDistance: number }> {
     const totals = new Map<number, { totalMessages: number; maxDistance: number }>();

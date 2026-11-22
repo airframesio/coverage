@@ -6,6 +6,7 @@ import { healthRoutes } from './routes/health.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { responseCache } from './response-cache.js';
 import { createMetricsRegistry } from '../metrics/metrics.js';
+import { requestMetrics } from '../metrics/http-metrics.js';
 import type { CoverageStore } from '../aggregation/coverage-store.js';
 import type { NatsSubscriber } from '../nats/subscriber.js';
 
@@ -18,6 +19,10 @@ export type AppContext = {
 
 export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hono<AppContext> {
   const app = new Hono<AppContext>();
+  const registry = createMetricsRegistry(store, nats);
+
+  // Outermost, so cached answers are counted too
+  app.use('*', requestMetrics(registry));
 
   // CORS for frontend
   app.use('*', cors({
@@ -39,6 +44,7 @@ export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hon
   app.use('/api/v1/stations', responseCache(10_000));
   app.use('/api/v1/stations/*', responseCache(10_000));
   app.use('/api/v1/stats', responseCache(5_000));
+  app.use('/api/v1/activity', responseCache(5_000));
 
   // Mount routes
   app.route('/api/v1/coverage', coverageRoutes);
@@ -46,7 +52,7 @@ export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hon
   app.route('/api/v1', healthRoutes);
 
   // Prometheus scrape endpoint at the root, gated by MONITORING_TOKEN
-  app.route('/', metricsRoutes(createMetricsRegistry(store, nats)));
+  app.route('/', metricsRoutes(registry));
 
   return app;
 }
