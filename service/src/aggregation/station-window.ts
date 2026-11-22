@@ -35,6 +35,23 @@ function sliceKey(stationId: number, transportType: TransportType): string {
 
 type Slice = Map<string, StationSliceData>;
 
+/** One station's totals in one saved slice, as stored in a snapshot */
+export interface SavedStationSliceEntry {
+  stationId: number;
+  transportType: TransportType;
+  /** Left out when the station saw no direction in this slice */
+  sectorMaxDist?: number[];
+  sectorMsgCount?: number[];
+  sectorLevelSum?: number[];
+  totalMessages: number;
+  messagesWithPosition: number;
+  totalLevelSum: number;
+  levelCount: number;
+  errorCount: number;
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
 const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
 
 /** Running totals for one station while its slices are added up */
@@ -113,6 +130,8 @@ export class StationSlidingWindow {
   readonly config: WindowConfig;
   private slices: Slice[];
   private currentIndex: number;
+  /** When each slice started taking data */
+  private sliceStarts: number[];
   private timer: ReturnType<typeof setInterval>;
 
   constructor(config: WindowConfig) {
@@ -122,12 +141,43 @@ export class StationSlidingWindow {
       this.slices.push(new Map());
     }
     this.currentIndex = 0;
+    this.sliceStarts = new Array<number>(config.slices).fill(0);
+    this.sliceStarts[0] = Date.now();
     this.timer = setInterval(() => this.rotate(), config.sliceMs);
   }
 
   private rotate(): void {
     this.currentIndex = (this.currentIndex + 1) % this.config.slices;
     this.slices[this.currentIndex].clear();
+    this.sliceStarts[this.currentIndex] = Date.now();
+  }
+
+  /**
+   * Slices that hold data, newest first, with the time each one started.
+   * Snapshots are saved per slice so a restart puts each slice back at its age.
+   */
+  slicesByAge(): { startedAt: number; current: boolean; slice: Slice }[] {
+    const out: { startedAt: number; current: boolean; slice: Slice }[] = [];
+    const total = this.config.slices;
+    for (let n = 0; n < total; n++) {
+      const index = (this.currentIndex - n + total) % total;
+      if (this.slices[index].size === 0) continue;
+      out.push({ startedAt: this.sliceStarts[index], current: n === 0, slice: this.slices[index] });
+    }
+    return out;
+  }
+
+  /**
+   * The slice a saved slice that started at `startedAt` belongs in, by age, or
+   * null when it has left the window. The slice takes over the saved start
+   * time, so the next save of it replaces the same snapshot row.
+   */
+  sliceFor(startedAt: number, now = Date.now()): { slice: Slice; current: boolean } | null {
+    const age = Math.max(0, Math.floor((now - startedAt) / this.config.sliceMs));
+    if (age >= this.config.slices) return null;
+    const index = (this.currentIndex - age + this.config.slices) % this.config.slices;
+    this.sliceStarts[index] = startedAt;
+    return { slice: this.slices[index], current: age === 0 };
   }
 
   /** Record a reception event */
@@ -212,6 +262,62 @@ export class StationSlidingWindow {
       data.levelCount += total;
     }
     data.errorCount += Math.round((saved.errorRate || 0) * total);
+  }
+
+  /** Every slice with data, newest first, in the form snapshots store */
+  exportSlices(): { startedAt: number; current: boolean; entries: SavedStationSliceEntry[] }[] {
+    return this.slicesByAge().map(({ startedAt, current, slice }) => ({
+      startedAt,
+      current,
+      entries: Array.from(slice, ([key, d]): SavedStationSliceEntry => ({
+        stationId: parseInt(key, 10),
+        transportType: d.transportType,
+        // Most entries never saw a direction (no positions, or a satellite
+        // relay); leave their empty sector arrays out of the snapshot
+        ...(d.sectorMsgCount.some(n => n > 0) || d.sectorMaxDist.some(n => n > 0)
+          ? {
+            sectorMaxDist: Array.from(d.sectorMaxDist, round1),
+            sectorMsgCount: Array.from(d.sectorMsgCount),
+            sectorLevelSum: Array.from(d.sectorLevelSum, round1),
+          }
+          : {}),
+        totalMessages: d.totalMessages,
+        messagesWithPosition: d.messagesWithPosition,
+        totalLevelSum: round1(d.totalLevelSum),
+        levelCount: d.levelCount,
+        errorCount: d.errorCount,
+      })),
+    }));
+  }
+
+  /**
+   * Put a saved slice back at its age. Returns whether it went into the
+   * current slice, or null when it is older than the window.
+   */
+  importSlice(startedAt: number, entries: SavedStationSliceEntry[]): boolean | null {
+    const target = this.sliceFor(startedAt);
+    if (!target) return null;
+    for (const e of entries) {
+      if (!Number.isInteger(e.stationId) || !TRANSPORT_TYPES.includes(e.transportType)) continue;
+      const key = sliceKey(e.stationId, e.transportType);
+      let data = target.slice.get(key);
+      if (!data) {
+        data = createEmptySliceData(e.transportType);
+        target.slice.set(key, data);
+      }
+      data.totalMessages += e.totalMessages || 0;
+      data.messagesWithPosition += e.messagesWithPosition || 0;
+      data.totalLevelSum += e.totalLevelSum || 0;
+      data.levelCount += e.levelCount || 0;
+      data.errorCount += e.errorCount || 0;
+      for (let i = 0; i < 36; i++) {
+        const dist = e.sectorMaxDist?.[i] ?? 0;
+        if (dist > data.sectorMaxDist[i]) data.sectorMaxDist[i] = dist;
+        data.sectorMsgCount[i] += e.sectorMsgCount?.[i] ?? 0;
+        data.sectorLevelSum[i] += e.sectorLevelSum?.[i] ?? 0;
+      }
+    }
+    return target.current;
   }
 
   /**

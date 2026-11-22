@@ -146,6 +146,8 @@ export class SlidingWindow {
   readonly config: WindowConfig;
   private slices: Slice[];
   private currentIndex: number;
+  /** When each slice started taking data */
+  private sliceStarts: number[];
   private timer: ReturnType<typeof setInterval>;
 
   constructor(config: WindowConfig) {
@@ -155,6 +157,8 @@ export class SlidingWindow {
       this.slices.push(new Map());
     }
     this.currentIndex = 0;
+    this.sliceStarts = new Array<number>(config.slices).fill(0);
+    this.sliceStarts[0] = Date.now();
 
     // Rotate to next slice on interval
     this.timer = setInterval(() => this.rotate(), config.sliceMs);
@@ -169,6 +173,35 @@ export class SlidingWindow {
   private rotate(): void {
     this.currentIndex = (this.currentIndex + 1) % this.config.slices;
     this.slices[this.currentIndex].clear();
+    this.sliceStarts[this.currentIndex] = Date.now();
+  }
+
+  /**
+   * Slices that hold data, newest first, with the time each one started.
+   * Snapshots are saved per slice so a restart puts each slice back at its age.
+   */
+  slicesByAge(): { startedAt: number; current: boolean; slice: Slice }[] {
+    const out: { startedAt: number; current: boolean; slice: Slice }[] = [];
+    const total = this.config.slices;
+    for (let n = 0; n < total; n++) {
+      const index = (this.currentIndex - n + total) % total;
+      if (this.slices[index].size === 0) continue;
+      out.push({ startedAt: this.sliceStarts[index], current: n === 0, slice: this.slices[index] });
+    }
+    return out;
+  }
+
+  /**
+   * The slice a saved slice that started at `startedAt` belongs in, by age, or
+   * null when it has left the window. The slice takes over the saved start
+   * time, so the next save of it replaces the same snapshot row.
+   */
+  sliceFor(startedAt: number, now = Date.now()): { slice: Slice; current: boolean } | null {
+    const age = Math.max(0, Math.floor((now - startedAt) / this.config.sliceMs));
+    if (age >= this.config.slices) return null;
+    const index = (this.currentIndex - age + this.config.slices) % this.config.slices;
+    this.sliceStarts[index] = startedAt;
+    return { slice: this.slices[index], current: age === 0 };
   }
 
   /**

@@ -81,10 +81,17 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   (src/metrics/metrics.ts). Names follow the Airframes metrics contract, prefix
   `coverage_`; keep labels to small fixed sets (no station ids or idents).
 - Snapshots of the 1h and longer windows go to PostgreSQL (`coverage_snapshots`,
-  src/data/persistence.ts) so a restart keeps its coverage. Each window is
-  rewritten every sixtieth of its length, between 1 and 15 minutes
-  (`snapshotInterval`), heard locations every 5 minutes, and everything on
-  shutdown. `coverage_snapshot_bytes_written_total` counts what is written.
+  src/data/persistence.ts) so a restart keeps its coverage. They are saved per
+  slice (`h3_slice`, `stations_slice`, with `slice_started_at`) and a restart puts
+  each slice back at its age, so 6h stays 6h and old slices still expire on time.
+  (Whole-window snapshots went into the newest slice: after a restart every view
+  showed its owner's full history, and history never expired across restarts.)
+  The current slice is rewritten every sixtieth of the window, between 1 and 15
+  minutes (`snapshotInterval`); a closed slice is written once more and then left
+  alone; rows of slices no longer in memory are deleted. Heard locations every
+  5 minutes, everything on shutdown. `coverage_snapshot_bytes_written_total`
+  counts what is written. The old `h3`/`stations` rows are read once after an
+  upgrade and deleted at the first per-slice save.
 - Station metadata synced from main API (authoritative coordinates)
 
 ## Key Directories
