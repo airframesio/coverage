@@ -72,6 +72,11 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   is read at scrape time from the counters `/api/v1/health` reports
   (src/metrics/metrics.ts). Names follow the Airframes metrics contract, prefix
   `coverage_`; keep labels to small fixed sets (no station ids or idents).
+- Snapshots of the 1h and longer windows go to PostgreSQL (`coverage_snapshots`,
+  src/data/persistence.ts) so a restart keeps its coverage. Each window is
+  rewritten every sixtieth of its length, between 1 and 15 minutes
+  (`snapshotInterval`), heard locations every 5 minutes, and everything on
+  shutdown. `coverage_snapshot_bytes_written_total` counts what is written.
 - Station metadata synced from main API (authoritative coordinates)
 
 ## Key Directories

@@ -12,7 +12,40 @@ const PERSIST_RESOLUTIONS = [2, 3, 4];
 
 const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
 
-const SAVE_INTERVAL = 60_000; // Save every 60 seconds
+const SAVE_INTERVAL = 60_000; // Check every 60 seconds which snapshots are due
+
+/**
+ * How often each window's snapshot is rewritten: a sixtieth of the window,
+ * between one and fifteen minutes (1h every minute, 6h every 6 minutes, 12h
+ * every 12, 24h and longer every 15). Rewriting every window every minute sent
+ * about 30 MB a minute to coverage-db, most of it the long windows, which a
+ * minute of traffic barely changes. A restart loses at most a sixtieth of a
+ * window's traffic, and shutdown still saves everything.
+ */
+export function snapshotInterval(windowMs: number): number {
+  return Math.min(15 * 60_000, Math.max(60_000, Math.round(windowMs / 60)));
+}
+
+/** Snapshots that are due: never saved, or saved at least an interval ago */
+export function dueSnapshots(
+  intervals: Map<string, number>, lastSaved: Map<string, number>, now: number,
+): Set<string> {
+  const due = new Set<string>();
+  for (const [name, interval] of intervals) {
+    const last = lastSaved.get(name);
+    // Small slack so a timer firing a little early does not skip a whole round
+    if (last === undefined || now - last >= interval - 5_000) due.add(name);
+  }
+  return due;
+}
+
+const HEARD_LOCATIONS = 'heard_locations';
+const SAVE_INTERVALS = new Map<string, number>([
+  ...PERSIST_WINDOW_NAMES.map((name): [string, number] => [
+    name, snapshotInterval(WINDOW_CONFIGS.find(w => w.name === name)!.windowMs),
+  ]),
+  [HEARD_LOCATIONS, 5 * 60_000],
+]);
 
 /**
  * Replace one snapshot. The delete and the insert are one transaction, so a
@@ -34,6 +67,7 @@ async function replaceSnapshot(
     await client.query(deleteSql, deleteParams);
     await client.query(insertSql, insertParams);
     await client.query('COMMIT');
+    for (const param of insertParams) if (typeof param === 'string') jobStatus.snapshotBytesWritten += param.length;
   } catch (err) {
     failure = failure ?? (err instanceof Error ? err : new Error(String(err)));
     await client.query('ROLLBACK').catch(() => {});
@@ -52,6 +86,8 @@ async function replaceSnapshot(
 export class Persistence {
   private store: CoverageStore;
   private timer: ReturnType<typeof setInterval> | null = null;
+  private lastSaved = new Map<string, number>();
+  private saving = false;
 
   constructor(store: CoverageStore) {
     this.store = store;
@@ -69,13 +105,21 @@ export class Persistence {
     }
   }
 
-  /** Save current state to PostgreSQL */
-  async save(): Promise<void> {
+  /**
+   * Save the snapshots that are due to PostgreSQL. `all` saves every one
+   * (shutdown).
+   */
+  async save(all = false): Promise<void> {
+    // A slow save must not overlap the next tick
+    if (this.saving) return;
+    this.saving = true;
     let saved = 0;
     const startedAt = Date.now();
+    const due = all ? new Set(SAVE_INTERVALS.keys()) : dueSnapshots(SAVE_INTERVALS, this.lastSaved, startedAt);
 
     try {
       for (const windowName of PERSIST_WINDOW_NAMES) {
+        if (!due.has(windowName)) continue;
         const windowIndex = WINDOW_CONFIGS.findIndex(w => w.name === windowName);
         for (const resolution of PERSIST_RESOLUTIONS) {
           // A view shares its owner's cells, and the owner's snapshot restores them
@@ -127,11 +171,13 @@ export class Persistence {
           );
           saved++;
         }
+        this.lastSaved.set(windowName, startedAt);
       }
 
       // Where GeoIP-located stations are heard, so they are not shown in the
       // wrong place again for the first minutes after every restart
-      const heard = this.store.getHeardLocations();
+      const heard = due.has(HEARD_LOCATIONS) ? this.store.getHeardLocations() : [];
+      if (due.has(HEARD_LOCATIONS)) this.lastSaved.set(HEARD_LOCATIONS, startedAt);
       if (heard.length > 0) {
         await replaceSnapshot(
           `DELETE FROM coverage_snapshots WHERE snapshot_type = 'heard_locations'`,
@@ -151,6 +197,8 @@ export class Persistence {
       }
     } catch (err) {
       console.error('[Persistence] Save failed:', err instanceof Error ? err.message : err);
+    } finally {
+      this.saving = false;
     }
   }
 
