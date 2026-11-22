@@ -14,8 +14,12 @@ const SIGNAL_CALIBRATION: Record<SourceFamily, { min: number; max: number }> = {
 
 /** Max plausible distance between receiver and target by source family (km) */
 export const MAX_RANGE_KM: Record<SourceFamily, number> = {
-  acars:   600,
-  vdl:     400,
+  // VHF line of sight to an aircraft at cruise height is about 470-500 km.
+  // With the 20% margin in isPlausibleRange positions are kept to 780 km
+  // (ACARS) and 600 km (VDL). At 400 km a quarter of VDL stations sat at the
+  // 480 km cutoff, and most VDL discards fell just past it (2026-11-22).
+  acars:   650,
+  vdl:     500,
   hfdl:    4000,
   satcom:  50000,   // relayed by satellite - effectively unlimited
   ais:     250,     // 300 km with the 20% margin in isPlausibleRange; good coastal antennas were seen at 140-240 km
