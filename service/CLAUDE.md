@@ -57,6 +57,8 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   (10 s), `/api/v1/stats` and `/api/v1/activity` (5 s) are kept and shared between callers asking the
   same question (src/api/response-cache.ts): they are computed on the thread that
   takes in events, and every open map polls them. Health is never cached.
+  Cached answers are sent br or gzip compressed (as the caller's Accept-Encoding
+  allows, 1 KB and up), each compressed once per encoding on the libuv pool.
   Anything that builds a list over all stations must do it in one pass over the
   window slices (`allStationCoverage`), never one scan per station, and a
   single-station route must look up only that station (`getStationMessageCount`).

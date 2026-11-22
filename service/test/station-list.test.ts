@@ -101,3 +101,47 @@ describe('one station\'s message count', () => {
     store.destroy();
   });
 });
+
+describe('response compression', () => {
+  const big = { cells: Array.from({ length: 500 }, (_, i) => ({ h3: `84${i}ffffffffff`, count: i })) };
+
+  it('sends cached answers as br or gzip, as the caller accepts, decoding to the same JSON', async () => {
+    const { brotliDecompressSync, gunzipSync } = await import('node:zlib');
+    const { responseCache } = await import('../src/api/response-cache.js');
+    let computed = 0;
+    const app = new Hono();
+    app.use('/big', responseCache(10_000));
+    app.get('/big', (c) => { computed++; return c.json(big); });
+
+    const br = await app.request('/big', { headers: { 'Accept-Encoding': 'gzip, deflate, br' } });
+    expect(br.headers.get('content-encoding')).toBe('br');
+    expect(br.headers.get('vary')).toBe('Accept-Encoding');
+    expect(br.headers.get('x-cache')).toBe('miss');
+    const brBytes = Buffer.from(await br.arrayBuffer());
+    expect(brBytes.length).toBeLessThan(JSON.stringify(big).length / 3);
+    expect(JSON.parse(brotliDecompressSync(brBytes).toString())).toEqual(big);
+
+    const gz = await app.request('/big', { headers: { 'Accept-Encoding': 'gzip' } });
+    expect(gz.headers.get('content-encoding')).toBe('gzip');
+    expect(gz.headers.get('x-cache')).toBe('hit');
+    expect(JSON.parse(gunzipSync(Buffer.from(await gz.arrayBuffer())).toString())).toEqual(big);
+
+    const plain = await app.request('/big');
+    expect(plain.headers.get('content-encoding')).toBeNull();
+    expect(await plain.json()).toEqual(big);
+
+    const refused = await app.request('/big', { headers: { 'Accept-Encoding': 'br;q=0, identity' } });
+    expect(refused.headers.get('content-encoding')).toBeNull();
+    expect(computed).toBe(1);
+  });
+
+  it('leaves small answers uncompressed', async () => {
+    const { responseCache } = await import('../src/api/response-cache.js');
+    const app = new Hono();
+    app.use('/small', responseCache(10_000));
+    app.get('/small', (c) => c.json({ ok: true }));
+    const res = await app.request('/small', { headers: { 'Accept-Encoding': 'br, gzip' } });
+    expect(res.headers.get('content-encoding')).toBeNull();
+    expect(await res.json()).toEqual({ ok: true });
+  });
+});
