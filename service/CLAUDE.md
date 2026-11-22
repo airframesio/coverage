@@ -66,6 +66,11 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   polygon in one answer) every 10 s; it used to make one request per station.
   `coverage_http_requests_total` / `coverage_http_request_duration_seconds`
   (labels route, status, cache) show which requests keep the thread busy.
+- `modes=acars,vdl,...` (families from src/compute/source-family.ts) filters
+  `/coverage/h3`, `/coverage/polygons` and `/stations`. Stations and polygons go by the
+  station's source type; a hex cell is kept when any source that heard it is of a
+  chosen family, and keeps the totals of all its sources (cells hold one set of
+  totals, not one per family). Missing or every family means no filter.
 - Prometheus metrics at `GET /metrics` (root of the same port, prom-client). The
   port is public, so the route needs `MONITORING_TOKEN` as `Authorization: Bearer`
   or `X-Monitoring-Token` and answers 401 when the variable is unset. Every value

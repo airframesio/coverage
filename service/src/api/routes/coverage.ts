@@ -3,10 +3,14 @@ import type { AppContext } from '../server.js';
 import { buildCoveragePolygon } from '../../compute/polygon-builder.js';
 import { WINDOW_CONFIGS, finestResolutionFor } from '../../types/coverage.js';
 import type { TransportType } from '../../types/events.js';
+import { parseModes, sourceFamily } from '../../compute/source-family.js';
 
 export const coverageRoutes = new Hono<AppContext>();
 
-/** GET /api/v1/coverage/h3 — H3 hex grid coverage data */
+/**
+ * GET /api/v1/coverage/h3 — H3 hex grid coverage data.
+ * `modes=acars,vdl` keeps cells heard on those radio families (see parseModes).
+ */
 coverageRoutes.get('/h3', (c) => {
   const store = c.get('store');
 
@@ -14,6 +18,7 @@ coverageRoutes.get('/h3', (c) => {
   const requestedResolution = parseInt(c.req.query('resolution') ?? '4', 10);
   const transportRaw = c.req.query('transport') ?? 'all';
   const minConfidence = c.req.query('minConfidence') ? parseFloat(c.req.query('minConfidence')!) : undefined;
+  const modes = parseModes(c.req.query('modes'));
 
   // Validate window name
   if (!WINDOW_CONFIGS.find(w => w.name === windowName)) {
@@ -31,7 +36,7 @@ coverageRoutes.get('/h3', (c) => {
 
   const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
   const transportType = validTransports.includes(transportRaw) ? transportRaw as TransportType : undefined;
-  const cells = store.getH3Data(resolution, windowName, { transportType, minConfidence });
+  const cells = store.getH3Data(resolution, windowName, { transportType, minConfidence, modes });
 
   return c.json({
     window: windowName,
@@ -40,7 +45,7 @@ coverageRoutes.get('/h3', (c) => {
     generatedAt: new Date().toISOString(),
     cellCount: cells.length,
     // Measured on a fixed grid, so it is the same at every resolution
-    coverageAreaKm2: store.getCoverageAreaKm2(windowName, transportType),
+    coverageAreaKm2: store.getCoverageAreaKm2(windowName, transportType, modes),
     cells,
   });
 });
@@ -60,6 +65,7 @@ coverageRoutes.get('/polygons', (c) => {
   const transportFilter = transportRaw && validTransports.includes(transportRaw)
     ? transportRaw as TransportType
     : undefined;
+  const modes = parseModes(c.req.query('modes'));
 
   if (!WINDOW_CONFIGS.find(w => w.name === windowName)) {
     return c.json({ error: `Invalid window: ${windowName}` }, 400);
@@ -73,6 +79,7 @@ coverageRoutes.get('/polygons', (c) => {
     if (station.latitude === 0 && station.longitude === 0) continue;
     if (transportFilter === 'aircraft' && MARINE_SOURCE_TYPES.has(station.sourceType)) continue;
     if (transportFilter === 'marine' && !MARINE_SOURCE_TYPES.has(station.sourceType)) continue;
+    if (modes && !modes.has(sourceFamily(station.sourceType))) continue;
     const messageCount = counts.get(coverage.stationId)?.messageCount ?? 0;
     if (messageCount === 0) continue;
 

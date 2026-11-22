@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import { useUIStore } from '../stores/ui-store';
 import { TIME_WINDOWS, type TimeWindowKey } from '../constants/time-windows';
+import { modesParam, parseModesHash } from '../constants/modes';
 
 /**
  * Sync UI state to/from URL hash parameters.
@@ -12,7 +13,9 @@ export function useUrlState() {
   const mode = useUIStore((s) => s.mode);
   const timeWindow = useUIStore((s) => s.timeWindow);
   const transportFilter = useUIStore((s) => s.transportFilter);
+  const modes = useUIStore((s) => s.modes);
   const viewState = useUIStore((s) => s.viewState);
+  const setModes = useUIStore((s) => s.setModes);
   const setMode = useUIStore((s) => s.setMode);
   const setTimeWindow = useUIStore((s) => s.setTimeWindow);
   const setTransportFilter = useUIStore((s) => s.setTransportFilter);
@@ -38,6 +41,9 @@ export function useUrlState() {
 
     const t = params.get('transport');
     if (t === 'all' || t === 'aircraft' || t === 'marine') setTransportFilter(t);
+    // After the transport filter, which resets the modes when it is All
+    const m2 = parseModesHash(params.get('modes'));
+    if (m2) setModes(m2);
 
     const lat = params.get('lat');
     const lon = params.get('lon');
@@ -49,7 +55,7 @@ export function useUrlState() {
         zoom: zoom ? parseFloat(zoom) : 6,
       });
     }
-  }, [setMode, setTimeWindow, setTransportFilter, flyTo]);
+  }, [setMode, setTimeWindow, setTransportFilter, setModes, flyTo]);
 
   // Debounced write to URL hash
   const writeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -61,6 +67,8 @@ export function useUrlState() {
       params.set('mode', mode);
       params.set('window', timeWindow);
       if (transportFilter !== 'all') params.set('transport', transportFilter);
+      const modesValue = modesParam(modes, transportFilter);
+      if (modesValue) params.set('modes', modesValue);
       params.set('lat', viewState.latitude.toFixed(2));
       params.set('lon', viewState.longitude.toFixed(2));
       params.set('zoom', viewState.zoom.toFixed(1));
@@ -70,5 +78,5 @@ export function useUrlState() {
         history.replaceState(null, '', `#${newHash}`);
       }
     }, 1000);
-  }, [mode, timeWindow, transportFilter, viewState]);
+  }, [mode, timeWindow, transportFilter, modes, viewState]);
 }

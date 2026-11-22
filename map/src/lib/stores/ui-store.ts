@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { DEFAULT_TIME_WINDOW, TIME_WINDOWS } from '../constants/time-windows';
 import type { TimeWindowKey } from '../constants/time-windows';
 import type { MapStyleId } from '../constants/map-styles';
+import { MODES, type ModeKey } from '../constants/modes';
 
 interface ViewState {
   longitude: number;
@@ -22,6 +23,8 @@ interface UIState {
   mode: 'hexgrid' | 'polygon';
   timeWindow: TimeWindowKey;
   transportFilter: 'all' | 'aircraft' | 'marine';
+  /** Radio modes shown; every mode by default */
+  modes: ModeKey[];
   selectedStationId: number | null;
   panelCollapsed: boolean;
   viewState: ViewState;
@@ -35,6 +38,8 @@ interface UIState {
   setMode: (mode: UIState['mode']) => void;
   setTimeWindow: (tw: TimeWindowKey) => void;
   setTransportFilter: (tf: UIState['transportFilter']) => void;
+  setModes: (modes: ModeKey[]) => void;
+  toggleMode: (mode: ModeKey) => void;
   selectStation: (id: number | null) => void;
   setPanelCollapsed: (collapsed: boolean) => void;
   setViewState: (vs: ViewState) => void;
@@ -54,6 +59,7 @@ export const useUIStore = create<UIState>()(
       mode: 'hexgrid',
       timeWindow: DEFAULT_TIME_WINDOW,
       transportFilter: 'all',
+      modes: [...MODES],
       selectedStationId: null,
       panelCollapsed: false,
       viewState: {
@@ -72,7 +78,16 @@ export const useUIStore = create<UIState>()(
 
       setMode: (mode) => set({ mode }),
       setTimeWindow: (timeWindow) => set({ timeWindow }),
-      setTransportFilter: (transportFilter) => set({ transportFilter }),
+      // Choosing All shows every mode again
+      setTransportFilter: (transportFilter) => set(
+        transportFilter === 'all' ? { transportFilter, modes: [...MODES] } : { transportFilter },
+      ),
+      setModes: (modes) => set({ modes }),
+      toggleMode: (mode) => set((s) => ({
+        modes: s.modes.includes(mode)
+          ? s.modes.filter((m) => m !== mode)
+          : MODES.filter((m) => m === mode || s.modes.includes(m)),
+      })),
       selectStation: (selectedStationId) => set({ selectedStationId }),
       setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
       setViewState: (viewState) => set({ viewState }),
@@ -91,6 +106,7 @@ export const useUIStore = create<UIState>()(
         mode: state.mode,
         timeWindow: state.timeWindow,
         transportFilter: state.transportFilter,
+        modes: state.modes,
         mapStyleId: state.mapStyleId,
       }),
       // A saved window may use a key that no longer exists (the one-month
@@ -100,7 +116,10 @@ export const useUIStore = create<UIState>()(
         const savedKey: string | undefined = saved.timeWindow;
         const key = savedKey === '1M' ? '1mo' : savedKey;
         const timeWindow = TIME_WINDOWS.find((w) => w.key === key)?.key ?? current.timeWindow;
-        return { ...current, ...saved, timeWindow };
+        const modes = Array.isArray(saved.modes)
+          ? MODES.filter((m) => saved.modes!.includes(m))
+          : current.modes;
+        return { ...current, ...saved, timeWindow, modes };
       },
     }
   )

@@ -21,6 +21,7 @@ import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
 import { useUrlState } from '@/lib/hooks/use-url-state';
 import type { CoverageHex, CoveragePolygon, Station } from '@/lib/types/coverage';
+import { modesParam } from '@/lib/constants/modes';
 
 const POLL_INTERVAL = 10_000;
 const STATS_INTERVAL = 5_000;
@@ -48,6 +49,8 @@ export default function CoverageMap() {
   const mode = useUIStore((s) => s.mode);
   const timeWindow = useUIStore((s) => s.timeWindow);
   const transportFilter = useUIStore((s) => s.transportFilter);
+  const selectedModes = useUIStore((s) => s.modes);
+  const modes = modesParam(selectedModes, transportFilter);
   const setViewState = useUIStore((s) => s.setViewState);
   const selectedStationId = useUIStore((s) => s.selectedStationId);
   const selectStation = useUIStore((s) => s.selectStation);
@@ -118,6 +121,7 @@ export default function CoverageMap() {
         resolution: String(h3Resolution),
         transport: transportFilter,
       });
+      if (modes) params.set('modes', modes);
       const res = await fetch(`${API_URL}/api/v1/coverage/h3?${params}`);
       if (res.ok) {
         const data = await res.json();
@@ -127,13 +131,14 @@ export default function CoverageMap() {
         );
       }
     } catch { /* retry next interval */ }
-  }, [timeWindow, h3Resolution, transportFilter, setHexData, setRefreshing]);
+  }, [timeWindow, h3Resolution, transportFilter, modes, setHexData, setRefreshing]);
 
   // One request for every station's polygon (the service builds them in one pass)
   const fetchPolygons = useCallback(async () => {
     try {
       const params = new URLSearchParams({ window: timeWindow });
       if (transportFilter !== 'all') params.set('transport', transportFilter);
+      if (modes) params.set('modes', modes);
       const res = await fetch(`${API_URL}/api/v1/coverage/polygons?${params}`);
       if (!res.ok) return;
       const data = await res.json();
@@ -147,19 +152,20 @@ export default function CoverageMap() {
       }));
       setPolygonData(polygons);
     } catch { /* retry next interval */ }
-  }, [timeWindow, transportFilter, setPolygonData]);
+  }, [timeWindow, transportFilter, modes, setPolygonData]);
 
   const fetchStations = useCallback(async () => {
     try {
       const params = new URLSearchParams({ window: timeWindow });
       if (transportFilter !== 'all') params.set('transport', transportFilter);
+      if (modes) params.set('modes', modes);
       const res = await fetch(`${API_URL}/api/v1/stations?${params}`);
       if (res.ok) {
         const data = await res.json();
         setStations(data.stations ?? []);
       }
     } catch { /* retry next interval */ }
-  }, [timeWindow, transportFilter, setStations]);
+  }, [timeWindow, transportFilter, modes, setStations]);
 
   const fetchStats = useCallback(async () => {
     try {

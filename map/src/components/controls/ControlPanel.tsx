@@ -8,7 +8,7 @@ import { TIME_WINDOWS, type TimeWindowKey } from '@/lib/constants/time-windows';
 import ModeToggle from './ModeToggle';
 import TimeSlider from './TimeSlider';
 import CoverageLegend from './CoverageLegend';
-import SourceLegend from './SourceLegend';
+import ModeFilter from './ModeFilter';
 import MapStyleSwitcher from './MapStyleSwitcher';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
@@ -189,9 +189,9 @@ export default function ControlPanel() {
             <>
               <ModeToggle />
               <TransportFilter />
+              <ModeFilter />
               <TimeSlider />
               <CoverageLegend />
-              <SourceLegend />
               <MapStyleSwitcher />
             </>
           )}

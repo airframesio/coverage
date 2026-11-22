@@ -27,3 +27,4 @@ Airframes coverage map visualization built with Next.js, Deck.gl, MapLibre GL JS
 ## Notes
 - maplibre-gl stays on 5.x: deck.gl 9.4's MapboxOverlay reads `map.transform`, which maplibre-gl 6 removed.
 - Source-type colors live in `src/lib/constants/colors.ts` (`sourceColor`); do not add per-component palettes.
+- Mode checkboxes (`ModeFilter`, `src/lib/constants/modes.ts`) send `modes=` only when some mode of the transport filter is unchecked; choosing All checks every mode again. They double as the marker color legend.
