@@ -47,7 +47,8 @@ export function createApiServer(store: CoverageStore, nats: NatsSubscriber): Hon
   // Share one computed answer between everyone asking within a few seconds.
   // Maps poll every 10 s. Health is not cached: it is the liveness check.
   app.use('/api/v1/coverage/*', responseCache(10_000));
-  app.use('/api/v1/stations', responseCache(10_000));
+  // '/*' also matches '/api/v1/stations' itself. Mount the cache once per path:
+  // a second mount would cache the first one's compressed bytes as text.
   app.use('/api/v1/stations/*', responseCache(10_000));
   app.use('/api/v1/stats', responseCache(5_000));
   app.use('/api/v1/activity', responseCache(5_000));

@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest';
+import { brotliDecompressSync, gunzipSync } from 'node:zlib';
 import { CoverageStore } from '../src/aggregation/coverage-store.js';
 import { createApiServer } from '../src/api/server.js';
 import { NatsSubscriber } from '../src/nats/subscriber.js';
@@ -74,5 +75,27 @@ describe('compression', () => {
       expect(body).toEqual(plain);
     }
     expect((await app.request('/api/v1/coverage/polygons?window=1h')).headers.get('content-encoding')).toBeNull();
+  });
+});
+
+describe('cached station list', () => {
+  it('is valid JSON with and without compression, on a miss and on a hit', async () => {
+    // Enough stations that the answer is over the 1 KB compression threshold
+    for (let id = 100; id < 110; id++) {
+      store.stationMap.set(id, station(id, 45 + id / 100, 10));
+      store.ingest(event(id, 45.5 + id / 100, 10.5));
+    }
+    for (const enc of ['br', 'gzip', 'identity', 'br']) {
+      const res = await app.request('/api/v1/stations?window=1h', { headers: { 'Accept-Encoding': enc } });
+      expect(res.status).toBe(200);
+      const raw = Buffer.from(await res.arrayBuffer());
+      const encoding = res.headers.get('Content-Encoding');
+      const text = encoding === 'br' ? brotliDecompressSync(raw).toString()
+        : encoding === 'gzip' ? gunzipSync(raw).toString()
+        : raw.toString();
+      // At most one layer of compression, of a kind the caller accepts
+      if (encoding) expect(encoding).toBe(enc);
+      expect(JSON.parse(text).stations.length).toBeGreaterThan(0);
+    }
   });
 });
