@@ -214,8 +214,10 @@ export class Persistence {
           // A moved station's range and direction were cleared in every slice,
           // closed ones included: write those again
           const revision = this.store.stationSectorsRevision();
-          const last = this.savedSectorsRevision.get(windowName);
-          if (last !== undefined && last !== revision) {
+          // The store counts from 0, so before a window's first save (closed
+          // slices restored by load() count as written) the baseline is 0
+          const last = this.savedSectorsRevision.get(windowName) ?? 0;
+          if (last !== revision) {
             const prefix = `${STATIONS_SLICE}|${windowName}|0|`;
             for (const key of this.writtenSlices) if (key.startsWith(prefix)) this.writtenSlices.delete(key);
           }
