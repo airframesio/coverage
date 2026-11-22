@@ -7,4 +7,6 @@ export const jobStatus = {
   stationSyncLastSuccess: 0,
   snapshotLastSuccess: 0,
   snapshotDurationSeconds: 0,
+  /** JSON bytes written to coverage_snapshots since start */
+  snapshotBytesWritten: 0,
 };

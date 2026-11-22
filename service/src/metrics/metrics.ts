@@ -114,6 +114,7 @@ export function createMetricsRegistry(store: CoverageStore, nats: NatsSubscriber
   gauge('coverage_station_sync_last_success_timestamp_seconds', 'Unix time of the last successful station sync from the main API (0 = none yet)', () => jobStatus.stationSyncLastSuccess);
   gauge('coverage_snapshot_last_success_timestamp_seconds', 'Unix time of the last successful snapshot save to PostgreSQL (0 = none yet)', () => jobStatus.snapshotLastSuccess);
   gauge('coverage_snapshot_duration_seconds', 'How long the last successful snapshot save took', () => jobStatus.snapshotDurationSeconds);
+  counter('coverage_snapshot_bytes_written_total', 'JSON bytes written to the coverage_snapshots table', () => jobStatus.snapshotBytesWritten);
 
   return registry;
 }

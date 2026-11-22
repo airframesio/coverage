@@ -78,7 +78,7 @@ async function main() {
     stationSync.stop();
     if (persistence) {
       persistence.stop();
-      await persistence.save(); // Final save
+      await persistence.save(true); // Final save, every snapshot
       console.log('[Persistence] Final snapshot saved');
     }
     await nats.disconnect();
