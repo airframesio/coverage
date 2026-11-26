@@ -6,6 +6,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Airframes Coverage Map",
   description: "Real-time coverage visualization of the Airframes feeder network",
+  appleWebApp: { title: "Coverage" },
 };
 
 export default function RootLayout({
