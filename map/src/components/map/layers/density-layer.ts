@@ -4,15 +4,21 @@ import { densityColor, shadeDensity, type DensityStyle, type ShadedCell } from '
 import type { CoveragePolygon, StationDensity } from '@/lib/types/coverage';
 
 /**
- * One station's reception density: its messages per H3 cell, colored on a log
- * spectrum. Cells with no reception are left empty.
+ * Reception density: messages per H3 cell, colored on a log spectrum. Cells
+ * with no reception are left empty. One station's (`coverage-density`), or
+ * every station's together when none is selected (`coverage-density-all`).
  */
-export function createDensityLayer(density: StationDensity, style: DensityStyle, light: boolean) {
+export function createDensityLayer(
+  density: Pick<StationDensity, 'cells' | 'maxCount'>,
+  style: DensityStyle,
+  light: boolean,
+  id: 'coverage-density' | 'coverage-density-all' = 'coverage-density',
+) {
   const data = shadeDensity(density.cells, density.maxCount);
   // A touch more opaque on light basemaps, where pale colors wash out
   const alpha = light ? 215 : 190;
   return new H3HexagonLayer<ShadedCell>({
-    id: 'coverage-density',
+    id,
     data,
     pickable: true,
     filled: true,

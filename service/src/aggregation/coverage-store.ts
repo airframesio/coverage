@@ -773,6 +773,54 @@ export class CoverageStore {
     return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stations.size }));
   }
 
+  /**
+   * Where all stations hear together: messages that came with a position per
+   * H3 cell over a window (the Density view with no station picked). Like
+   * getStationDensity, positionless messages filed in each station's own cell
+   * are left out, so stations do not show as the hot spots. One pass over the
+   * window's slices.
+   */
+  getDensity(
+    resolution: number, windowName: string, opts?: { transportType?: TransportType; modes?: ReadonlySet<SourceFamily> },
+  ): { h3: string; msgCount: number; stationCount: number }[] {
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1 || !shouldMaintainResolution(resolution, wi)) return [];
+
+    // Slices restored from older snapshots do not say which messages had a
+    // position: their cells at station locations are left out (built only if needed)
+    let ownCells: Set<string> | null = null;
+    const stationCells = () => {
+      if (!ownCells) {
+        ownCells = new Set();
+        for (const st of this.stationMap.values()) {
+          if (st.latitude === 0 && st.longitude === 0) continue;
+          ownCells.add(latLngToCell(st.latitude, st.longitude, resolution));
+        }
+      }
+      return ownCells;
+    };
+
+    const counts = new Map<string, { msgCount: number; stations: Set<number> }>();
+    this.windows[ri][wi].forEachCell((h3, cell, positionlessUnknown) => {
+      if (opts?.transportType && !cellHasTransport(cell, opts.transportType)) return;
+      if (opts?.modes && !cellHasFamily(cell, opts.modes)) return;
+      if (positionlessUnknown && stationCells().has(h3)) return;
+      let n = cell.messageCount;
+      if (cell.positionless) for (const p of cell.positionless.values()) n -= p;
+      if (n <= 0) return;
+      let entry = counts.get(h3);
+      if (!entry) {
+        entry = { msgCount: 0, stations: new Set() };
+        counts.set(h3, entry);
+      }
+      entry.msgCount += n;
+      for (const id of cellStationIds(cell)) entry.stations.add(id);
+    }, WINDOW_CONFIGS[wi].viewSlices);
+
+    return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stations.size }));
+  }
+
   /** Cells of one resolution merged across a window's slices */
   private aggregated(ri: number, wi: number): Map<string, CellAggregation> {
     return this.windows[ri][wi].getAggregated(WINDOW_CONFIGS[wi].viewSlices);

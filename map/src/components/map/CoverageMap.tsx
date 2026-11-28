@@ -71,6 +71,8 @@ export default function CoverageMap() {
   const polygonData = useCoverageStore((s) => s.polygonData);
   const densityData = useCoverageStore((s) => s.densityData);
   const setDensityData = useCoverageStore((s) => s.setDensityData);
+  const allDensityData = useCoverageStore((s) => s.allDensityData);
+  const setAllDensityData = useCoverageStore((s) => s.setAllDensityData);
   const stations = useCoverageStore((s) => s.stations);
   const setHexData = useCoverageStore((s) => s.setHexData);
   const setPolygonData = useCoverageStore((s) => s.setPolygonData);
@@ -81,7 +83,13 @@ export default function CoverageMap() {
   const [h3Resolution, setH3Resolution] = useState(() => zoomToH3Resolution(viewState.zoom));
   const zoomDebounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
-  const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
+  // A polygon clicked in the Polygons view does not carry into Density, which
+  // opens on every station together until one is picked
+  const [polygonPick, setPolygonPick] = useState<{ polygon: CoveragePolygon; density: boolean } | null>(null);
+  const selectedPolygon = polygonPick && (mode !== 'density' || polygonPick.density) ? polygonPick.polygon : null;
+  const setSelectedPolygon = useCallback((polygon: CoveragePolygon | null) => {
+    setPolygonPick(polygon ? { polygon, density: mode === 'density' } : null);
+  }, [mode]);
   const mapRef = useRef<MapRef>(null);
 
   // The station the views focus on: picked from the list or a marker, or by
@@ -226,9 +234,35 @@ export default function CoverageMap() {
     } catch { /* retry next interval */ }
   }, [focusStationId, timeWindow, transportFilter, setDensityData]);
 
+  // Every station's density together, for the Density view with no station
+  // picked. Keyed by what it answers, so a slower answer for an earlier
+  // window or filter is never drawn as the current one.
+  const allDensityKey = `${timeWindow}|${transportFilter}|${modes ?? ''}`;
+  const allDensityRequest = useRef(0);
+  const fetchAllDensity = useCallback(async () => {
+    const request = ++allDensityRequest.current;
+    try {
+      const params = new URLSearchParams({ window: timeWindow });
+      if (transportFilter !== 'all') params.set('transport', transportFilter);
+      if (modes) params.set('modes', modes);
+      const res = await fetch(`${API_URL}/api/v1/coverage/density?${params}`);
+      if (request !== allDensityRequest.current || !res.ok) return;
+      const data = await res.json();
+      if (request !== allDensityRequest.current) return;
+      setAllDensityData({
+        key: allDensityKey,
+        resolution: data.resolution,
+        maxCount: data.maxCount ?? 0,
+        totalMessages: data.totalMessages ?? 0,
+        cells: data.cells ?? [],
+      });
+    } catch { /* retry next interval */ }
+  }, [allDensityKey, timeWindow, transportFilter, modes, setAllDensityData]);
+
   // Polygons are shown in the Polygons view and around the density
   const wantsPolygons = mode !== 'hexgrid';
   const wantsDensity = mode === 'density' && focusStationId !== null;
+  const wantsAllDensity = mode === 'density' && focusStationId === null;
 
   // Fetch polygons when the view switches to polygons or the window/filter changes
   useEffect(() => {
@@ -239,6 +273,10 @@ export default function CoverageMap() {
     if (wantsDensity) fetchDensity();
   }, [wantsDensity, fetchDensity]);
 
+  useEffect(() => {
+    if (wantsAllDensity) fetchAllDensity();
+  }, [wantsAllDensity, fetchAllDensity]);
+
   // Periodic silent refresh
   useEffect(() => {
     const interval = setInterval(() => {
@@ -246,9 +284,10 @@ export default function CoverageMap() {
       fetchStations();
       if (wantsPolygons) fetchPolygons();
       if (wantsDensity) fetchDensity();
+      if (wantsAllDensity) fetchAllDensity();
     }, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [fetchCoverage, fetchStations, fetchPolygons, fetchDensity, wantsPolygons, wantsDensity]);
+  }, [fetchCoverage, fetchStations, fetchPolygons, fetchDensity, fetchAllDensity, wantsPolygons, wantsDensity, wantsAllDensity]);
 
   // Stats on faster interval
   useEffect(() => {
@@ -268,7 +307,14 @@ export default function CoverageMap() {
       result.push(createHexGridLayer(
         solo ? hexData.filter((c) => c.stationIds?.includes(focusStationId!)) : hexData,
       ));
-    } else if (mode === 'polygon' || focusStationId === null) {
+    } else if (mode === 'density' && focusStationId === null) {
+      // Density with no station: every station's polygon, with the density of
+      // all of them together (the hex grid's cells) on top
+      result.push(createPolygonLayer(polygonData, null, true));
+      if (allDensityData && allDensityData.key === allDensityKey && allDensityData.cells.length > 0) {
+        result.push(createDensityLayer(allDensityData, densityStyle, lightBasemap, 'coverage-density-all'));
+      }
+    } else if (mode === 'polygon') {
       result.push(createPolygonLayer(
         solo ? polygonData.filter((p) => p.stationId === focusStationId) : polygonData,
         focusStationId,
@@ -294,7 +340,7 @@ export default function CoverageMap() {
       focusStationId,
     ));
     return result;
-  }, [mode, hexData, polygonData, densityData, densityStyle, lightBasemap, stations, focusStationId, solo, timeWindow]);
+  }, [mode, hexData, polygonData, densityData, allDensityData, allDensityKey, densityStyle, lightBasemap, stations, focusStationId, solo, timeWindow]);
 
   const getTooltip = useCallback(({ object, layer }: PickingInfo) => {
     if (!object) return null;
@@ -334,6 +380,17 @@ export default function CoverageMap() {
       return { className: 'deck-tooltip', text: lines.join('\n') };
     }
 
+    if (layer?.id === 'coverage-density-all') {
+      const cell = object as ShadedCell;
+      const width = H3_CELL_WIDTH_KM[useCoverageStore.getState().allDensityData?.resolution ?? 4];
+      const lines = [
+        `${cell.msgCount.toLocaleString()} message${cell.msgCount !== 1 ? 's' : ''} here`,
+        width ? `Cell about ${width} km wide` : null,
+        `Heard by ${cell.stationCount} station${cell.stationCount !== 1 ? 's' : ''}`,
+      ].filter(Boolean);
+      return { className: 'deck-tooltip', text: lines.join('\n') };
+    }
+
     if (layer?.id === 'coverage-polygons') {
       const polygon = object as CoveragePolygon;
       return {
@@ -351,6 +408,11 @@ export default function CoverageMap() {
     if (onlySelected && focusStationId !== null && info.layer?.id !== 'station-markers') return;
     // A density cell belongs to the focused station; its tooltip says the rest
     if (info.layer?.id === 'coverage-density') return;
+    // Density of all stations: a station is picked from its marker or the list.
+    // Polygons overlap there (an area feed's covers whole regions), so a click
+    // on one would pick a station nobody meant to
+    if (mode === 'density' && focusStationId === null
+      && (info.layer?.id === 'coverage-density-all' || info.layer?.id === 'coverage-polygons')) return;
     if (info.layer?.id === 'station-markers' && info.object) {
       selectStation((info.object as Station).id);
       setSelectedHex(null);
@@ -368,14 +430,14 @@ export default function CoverageMap() {
       setSelectedHex(null);
       setSelectedPolygon(null);
     }
-  }, [selectStation, onlySelected, focusStationId]);
+  }, [selectStation, onlySelected, focusStationId, mode, setSelectedPolygon]);
 
   // Escape closes whichever detail popup is open
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setSelectedHex(null);
-      setSelectedPolygon(null);
+      setPolygonPick(null);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
