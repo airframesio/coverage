@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware';
 import { DEFAULT_TIME_WINDOW, TIME_WINDOWS } from '../constants/time-windows';
 import type { TimeWindowKey } from '../constants/time-windows';
 import type { MapStyleId } from '../constants/map-styles';
+import type { DensityStyle } from '../constants/density';
 import { MODES, type ModeKey } from '../constants/modes';
 
 interface ViewState {
@@ -19,13 +20,21 @@ interface FlyToTarget {
   zoom: number;
 }
 
+export type ViewMode = 'hexgrid' | 'polygon' | 'density';
+
 interface UIState {
-  mode: 'hexgrid' | 'polygon';
+  mode: ViewMode;
   timeWindow: TimeWindowKey;
   transportFilter: 'all' | 'aircraft' | 'marine';
   /** Radio modes shown; every mode by default */
   modes: ModeKey[];
   selectedStationId: number | null;
+  /** Station of the polygon clicked on the map (its card is open), if any */
+  polygonStationId: number | null;
+  /** Show only the selected station and hide the others (all views) */
+  onlySelected: boolean;
+  /** Density view: colored bands, or one smooth gradient */
+  densityStyle: DensityStyle;
   panelCollapsed: boolean;
   viewState: ViewState;
   flyToTarget: FlyToTarget | null;
@@ -41,6 +50,10 @@ interface UIState {
   setModes: (modes: ModeKey[]) => void;
   toggleMode: (mode: ModeKey) => void;
   selectStation: (id: number | null) => void;
+  setPolygonStationId: (id: number | null) => void;
+  setOnlySelected: (on: boolean) => void;
+  toggleOnlySelected: () => void;
+  setDensityStyle: (style: DensityStyle) => void;
   setPanelCollapsed: (collapsed: boolean) => void;
   setViewState: (vs: ViewState) => void;
   flyTo: (target: FlyToTarget) => void;
@@ -61,6 +74,9 @@ export const useUIStore = create<UIState>()(
       transportFilter: 'all',
       modes: [...MODES],
       selectedStationId: null,
+      polygonStationId: null,
+      onlySelected: false,
+      densityStyle: 'bands' as DensityStyle,
       panelCollapsed: false,
       viewState: {
         longitude: -40,
@@ -89,6 +105,10 @@ export const useUIStore = create<UIState>()(
           : MODES.filter((m) => m === mode || s.modes.includes(m)),
       })),
       selectStation: (selectedStationId) => set({ selectedStationId }),
+      setPolygonStationId: (polygonStationId) => set({ polygonStationId }),
+      setOnlySelected: (onlySelected) => set({ onlySelected }),
+      toggleOnlySelected: () => set((s) => ({ onlySelected: !s.onlySelected })),
+      setDensityStyle: (densityStyle) => set({ densityStyle }),
       setPanelCollapsed: (panelCollapsed) => set({ panelCollapsed }),
       setViewState: (viewState) => set({ viewState }),
       flyTo: (flyToTarget) => set({ flyToTarget }),
@@ -108,6 +128,8 @@ export const useUIStore = create<UIState>()(
         transportFilter: state.transportFilter,
         modes: state.modes,
         mapStyleId: state.mapStyleId,
+        onlySelected: state.onlySelected,
+        densityStyle: state.densityStyle,
       }),
       // A saved window may use a key that no longer exists (the one-month
       // window was once saved as '1M'). Map it across, or fall back to the default.

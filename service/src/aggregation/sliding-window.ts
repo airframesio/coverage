@@ -86,17 +86,83 @@ export function cellHasFamily(cell: CellAggregation, families: ReadonlySet<Sourc
 /** Station ids recorded in a cell */
 export function cellStationIds(cell: CellAggregation): number[] {
   if (typeof cell.stationIds === 'number') return cell.stationIds === 0 ? [] : [cell.stationIds];
-  return Array.from(cell.stationIds);
+  return Array.from(cell.stationIds.keys());
 }
 
-export function addCellStation(cell: CellAggregation, stationId: number): void {
+/** Messages one station contributed to a cell */
+export function cellStationCount(cell: CellAggregation, stationId: number): number {
+  const ids = cell.stationIds;
+  if (typeof ids === 'number') return ids === stationId ? cell.messageCount : 0;
+  return ids.get(stationId) ?? 0;
+}
+
+/**
+ * Credit `count` of a cell's messages to a station. Call it after the cell's
+ * messageCount already includes them: while only one station has reported the
+ * cell, its count is the cell's own, and when a second one arrives everything
+ * before belongs to the first.
+ */
+export function addCellStation(cell: CellAggregation, stationId: number, count = 1): void {
   const current = cell.stationIds;
   if (typeof current === 'number') {
     if (current === 0) cell.stationIds = stationId;
-    else if (current !== stationId) cell.stationIds = new Set([current, stationId]);
+    else if (current !== stationId) {
+      cell.stationIds = new Map([[current, Math.max(0, cell.messageCount - count)], [stationId, count]]);
+    }
   } else {
-    current.add(stationId);
+    current.set(stationId, (current.get(stationId) ?? 0) + count);
   }
+}
+
+/** [station id, messages] for every station that reported a cell */
+function stationEntries(cell: CellAggregation): [number, number][] {
+  const ids = cell.stationIds;
+  if (typeof ids === 'number') return ids === 0 ? [] : [[ids, cell.messageCount]];
+  return Array.from(ids);
+}
+
+/**
+ * Add the stations of `source` to `target`, whose messageCount already
+ * includes the source's messages. `targetBefore` is target's count before.
+ */
+export function mergeCellStations(target: CellAggregation, targetBefore: number, source: CellAggregation): void {
+  const entries = stationEntries(source);
+  if (entries.length === 0) return;
+  let ids = target.stationIds;
+  if (typeof ids === 'number') {
+    if (ids === 0 && entries.length === 1) {
+      target.stationIds = entries[0][0];
+      return;
+    }
+    if (entries.length === 1 && entries[0][0] === ids) return;
+    const map = new Map<number, number>();
+    if (ids !== 0) map.set(ids, targetBefore);
+    target.stationIds = ids = map;
+  }
+  for (const [sid, n] of entries) ids.set(sid, (ids.get(sid) ?? 0) + n);
+}
+
+/**
+ * Set a restored cell's stations. `counts` are each station's messages (from
+ * snapshots that saved them); without them the cell's messages are shared
+ * out evenly.
+ */
+export function setCellStations(cell: CellAggregation, stationIds: number[], counts?: number[]): void {
+  const ids = stationIds.filter(id => Number.isInteger(id) && id !== 0);
+  if (ids.length === 0) return;
+  if (ids.length === 1) {
+    cell.stationIds = ids[0];
+    return;
+  }
+  const map = new Map<number, number>();
+  const even = Math.floor(cell.messageCount / ids.length);
+  const useCounts = counts && counts.length === stationIds.length;
+  stationIds.forEach((id, i) => {
+    if (!Number.isInteger(id) || id === 0) return;
+    const n = useCounts ? Math.max(0, Math.floor(counts![i]) || 0) : even;
+    map.set(id, (map.get(id) ?? 0) + n);
+  });
+  cell.stationIds = map;
 }
 
 /** Transport types recorded in a cell */
@@ -223,7 +289,7 @@ export class SlidingWindow {
           // Clone the cell
           result.set(h3, {
             ...cell,
-            stationIds: typeof cell.stationIds === 'number' ? cell.stationIds : new Set(cell.stationIds),
+            stationIds: typeof cell.stationIds === 'number' ? cell.stationIds : new Map(cell.stationIds),
           });
         } else {
           // Merge into existing
@@ -236,16 +302,26 @@ export class SlidingWindow {
           // Slices are read newest first, so an older slice holds the earlier source
           if (cell.primarySource !== 0) existing.primarySource = cell.primarySource;
           existing.transportTypes |= cell.transportTypes;
-          if (typeof cell.stationIds === 'number') {
-            if (cell.stationIds !== 0) addCellStation(existing, cell.stationIds);
-          } else {
-            for (const sid of cell.stationIds) addCellStation(existing, sid);
-          }
+          mergeCellStations(existing, existing.messageCount - cell.messageCount, cell);
         }
       }
     }
 
     return result;
+  }
+
+  /**
+   * Visit every cell of every slice, or of only the newest `newestSlices`,
+   * without merging them. Cheaper than getAggregated when only a few cells
+   * matter (one station's density).
+   */
+  forEachCell(fn: (h3: string, cell: CellAggregation) => void, newestSlices?: number): void {
+    const total = this.config.slices;
+    const count = Math.min(newestSlices ?? total, total);
+    for (let n = 0; n < count; n++) {
+      const slice = this.slices[(this.currentIndex - n + total) % total];
+      for (const [h3, cell] of slice) fn(h3, cell);
+    }
   }
 
   /** Total message count across all slices */

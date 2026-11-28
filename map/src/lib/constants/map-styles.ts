@@ -21,4 +21,7 @@ export const MAP_STYLES = [
   },
 ] as const;
 
+/** Basemaps with a light background, where overlays need dark outlines */
+export const LIGHT_MAP_STYLES: ReadonlySet<string> = new Set(['positron', 'voyager-dark']);
+
 export type MapStyleId = typeof MAP_STYLES[number]['id'];

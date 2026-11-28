@@ -8,6 +8,7 @@ import { modesParam, parseModesHash } from '../constants/modes';
 /**
  * Sync UI state to/from URL hash parameters.
  * Enables sharing links like: /map#mode=hexgrid&window=1h&lat=51.5&lon=-0.1&zoom=8
+ * (`station=<id>` selects a station, `only=1` hides the others)
  */
 export function useUrlState() {
   const mode = useUIStore((s) => s.mode);
@@ -15,6 +16,11 @@ export function useUrlState() {
   const transportFilter = useUIStore((s) => s.transportFilter);
   const modes = useUIStore((s) => s.modes);
   const viewState = useUIStore((s) => s.viewState);
+  const selectedStationId = useUIStore((s) => s.selectedStationId);
+  const polygonStationId = useUIStore((s) => s.polygonStationId);
+  const onlySelected = useUIStore((s) => s.onlySelected);
+  const selectStation = useUIStore((s) => s.selectStation);
+  const setOnlySelected = useUIStore((s) => s.setOnlySelected);
   const setModes = useUIStore((s) => s.setModes);
   const setMode = useUIStore((s) => s.setMode);
   const setTimeWindow = useUIStore((s) => s.setTimeWindow);
@@ -34,7 +40,12 @@ export function useUrlState() {
     const params = new URLSearchParams(hash);
 
     const m = params.get('mode');
-    if (m === 'hexgrid' || m === 'polygon') setMode(m);
+    if (m === 'hexgrid' || m === 'polygon' || m === 'density') setMode(m);
+
+    const station = parseInt(params.get('station') ?? '', 10);
+    if (Number.isInteger(station) && station > 0) selectStation(station);
+    const only = params.get('only');
+    if (only === '1' || only === '0') setOnlySelected(only === '1');
 
     const w = params.get('window');
     if (w && TIME_WINDOWS.some((tw) => tw.key === w)) setTimeWindow(w as TimeWindowKey);
@@ -55,7 +66,7 @@ export function useUrlState() {
         zoom: zoom ? parseFloat(zoom) : 6,
       });
     }
-  }, [setMode, setTimeWindow, setTransportFilter, setModes, flyTo]);
+  }, [setMode, setTimeWindow, setTransportFilter, setModes, flyTo, selectStation, setOnlySelected]);
 
   // Debounced write to URL hash
   const writeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -69,6 +80,12 @@ export function useUrlState() {
       if (transportFilter !== 'all') params.set('transport', transportFilter);
       const modesValue = modesParam(modes, transportFilter);
       if (modesValue) params.set('modes', modesValue);
+      const stationId = selectedStationId ?? polygonStationId;
+      if (stationId !== null) {
+        params.set('station', String(stationId));
+        // Always say which: the recipient may have the other setting saved
+        params.set('only', onlySelected ? '1' : '0');
+      }
       params.set('lat', viewState.latitude.toFixed(2));
       params.set('lon', viewState.longitude.toFixed(2));
       params.set('zoom', viewState.zoom.toFixed(1));
@@ -78,5 +95,5 @@ export function useUrlState() {
         history.replaceState(null, '', `#${newHash}`);
       }
     }, 1000);
-  }, [mode, timeWindow, transportFilter, modes, viewState]);
+  }, [mode, timeWindow, transportFilter, modes, viewState, selectedStationId, polygonStationId, onlySelected]);
 }

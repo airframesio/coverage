@@ -11,7 +11,15 @@ Airframes coverage map visualization built with Next.js, Deck.gl, MapLibre GL JS
 
 ## Architecture
 - Full-viewport dark map (CartoDB Dark Matter tiles)
-- Two modes: H3 hex grid (Helium-style) and per-station coverage polygons
+- Three views: H3 hex grid (Helium-style), per-station coverage polygons, and
+  Density (one station's messages per H3 cell from
+  `/api/v1/coverage/stations/:id/density`, log-scaled on the spectrum in
+  `src/lib/constants/density.ts`, Bands or Smooth, neighbors averaged; the other
+  stations' polygons stay faded and clickable)
+- "Only selected station" (`onlySelected`, S key, station card button, `only=1`
+  in the URL with `station=<id>`) hides other stations' cells, polygons and
+  markers in every view. The focused station is `selectedStationId`, else the
+  clicked polygon's (`polygonStationId`)
 - Data from coverage-service backend (port 3002)
 - Zustand for state management
 - shadcn/ui for control panel components

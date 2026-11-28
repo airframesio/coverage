@@ -13,6 +13,7 @@ import MapStyleSwitcher from './MapStyleSwitcher';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
 import TopStations from './TopStations';
+import OnlySelectedToggle from './OnlySelectedToggle';
 import { buildCoverageGeoJSON } from '@/lib/export-geojson';
 
 export default function ControlPanel() {
@@ -30,14 +31,25 @@ export default function ControlPanel() {
   const togglePitch3d = useUIStore((s) => s.togglePitch3d);
   const helpOpen = useUIStore((s) => s.helpOpen);
   const toggleHelp = useUIStore((s) => s.toggleHelp);
+  const toggleOnlySelected = useUIStore((s) => s.toggleOnlySelected);
+  const hasStation = useUIStore((s) => s.selectedStationId !== null || s.polygonStationId !== null);
 
   // Export what is currently on the map: hex cells or station polygons
   // (depending on mode) plus the station markers.
   const exportGeoJSON = () => {
-    const { hexData, polygonData, stations } = useCoverageStore.getState();
-    const { mode, transportFilter } = useUIStore.getState();
+    const { hexData, polygonData, stations, densityData } = useCoverageStore.getState();
+    const { mode, transportFilter, onlySelected, selectedStationId, polygonStationId } = useUIStore.getState();
+    // Same rules as the map: only the focused station when that is on
+    const focusId = selectedStationId ?? polygonStationId;
+    const solo = onlySelected && focusId !== null;
     const geojson = buildCoverageGeoJSON({
-      mode, timeWindow, transportFilter, hexData, polygonData, stations,
+      mode, timeWindow, transportFilter,
+      hexData: solo ? hexData.filter((c) => c.stationIds?.includes(focusId)) : hexData,
+      polygonData: solo ? polygonData.filter((p) => p.stationId === focusId) : polygonData,
+      stations: solo ? stations.filter((s) => s.id === focusId) : stations,
+      densityData: densityData && densityData.stationId === focusId && densityData.window === timeWindow
+        ? densityData
+        : null,
     });
     const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
     const url = URL.createObjectURL(blob);
@@ -57,6 +69,8 @@ export default function ControlPanel() {
       switch (e.key) {
         case 'h': setMode('hexgrid'); break;
         case 'p': setMode('polygon'); break;
+        case 'd': setMode('density'); break;
+        case 's': toggleOnlySelected(); break;
         case 'f': toggleFullscreen(); break;
         case '3': togglePitch3d(); break;
         case 'Escape': selectStation(null); break;
@@ -74,7 +88,7 @@ export default function ControlPanel() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setMode, timeWindow, setTimeWindow, selectStation, toggleFullscreen, togglePitch3d]);
+  }, [setMode, timeWindow, setTimeWindow, selectStation, toggleFullscreen, togglePitch3d, toggleOnlySelected]);
 
   if (fullscreen) {
     // Minimal UI in fullscreen: just the logo and an exit hint
@@ -188,17 +202,21 @@ export default function ControlPanel() {
           {!panelCollapsed && (
             <>
               <ModeToggle />
+              <OnlySelectedToggle hasStation={hasStation} />
               <TransportFilter />
               <ModeFilter />
               <TimeSlider />
-              <CoverageLegend />
+              <CoverageLegend hasStation={hasStation} />
               <MapStyleSwitcher />
             </>
           )}
         </div>
 
-        <StatsBar />
-        <TopStations />
+        {/* On phones a selected station's card takes their place */}
+        <div className={`flex flex-col gap-3 ${hasStation ? 'max-sm:hidden' : ''}`}>
+          <StatsBar />
+          <TopStations />
+        </div>
       </div>
     </>
   );

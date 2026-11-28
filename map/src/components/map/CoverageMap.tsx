@@ -6,11 +6,13 @@ import { MapboxOverlay, type MapboxOverlayProps } from '@deck.gl/mapbox';
 import type { PickingInfo } from '@deck.gl/core';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MAP_CONFIG, zoomToH3Resolution } from '@/lib/constants/map-config';
-import { MAP_STYLES } from '@/lib/constants/map-styles';
+import { MAP_STYLES, LIGHT_MAP_STYLES } from '@/lib/constants/map-styles';
+import { H3_CELL_WIDTH_KM, type ShadedCell } from '@/lib/constants/density';
 import { useUIStore } from '@/lib/stores/ui-store';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
 import { createHexGridLayer } from './layers/hex-grid-layer';
 import { createPolygonLayer } from './layers/polygon-layer';
+import { createDensityLayer, createDensityOutlineLayer } from './layers/density-layer';
 import { createStationMarkersLayer } from './layers/station-markers-layer';
 import ControlPanel from '@/components/controls/ControlPanel';
 import ConnectionBanner from '@/components/controls/ConnectionBanner';
@@ -20,7 +22,7 @@ import StationPopup from '@/components/station/StationPopup';
 import HexPopup from '@/components/map/HexPopup';
 import PolygonPopup from '@/components/map/PolygonPopup';
 import { useUrlState } from '@/lib/hooks/use-url-state';
-import type { CoverageHex, CoveragePolygon, Station } from '@/lib/types/coverage';
+import type { CoverageHex, CoveragePolygon, Station, StationDensity } from '@/lib/types/coverage';
 import { modesParam } from '@/lib/constants/modes';
 
 const POLL_INTERVAL = 10_000;
@@ -59,11 +61,16 @@ export default function CoverageMap() {
   const pitch3d = useUIStore((s) => s.pitch3d);
   const fullscreen = useUIStore((s) => s.fullscreen);
   const mapStyleId = useUIStore((s) => s.mapStyleId);
+  const onlySelected = useUIStore((s) => s.onlySelected);
+  const densityStyle = useUIStore((s) => s.densityStyle);
+  const lightBasemap = LIGHT_MAP_STYLES.has(mapStyleId);
 
   const mapStyleUrl = MAP_STYLES.find((s) => s.id === mapStyleId)?.url ?? MAP_STYLES[0].url;
 
   const hexData = useCoverageStore((s) => s.hexData);
   const polygonData = useCoverageStore((s) => s.polygonData);
+  const densityData = useCoverageStore((s) => s.densityData);
+  const setDensityData = useCoverageStore((s) => s.setDensityData);
   const stations = useCoverageStore((s) => s.stations);
   const setHexData = useCoverageStore((s) => s.setHexData);
   const setPolygonData = useCoverageStore((s) => s.setPolygonData);
@@ -76,6 +83,14 @@ export default function CoverageMap() {
   const [selectedHex, setSelectedHex] = useState<CoverageHex | null>(null);
   const [selectedPolygon, setSelectedPolygon] = useState<CoveragePolygon | null>(null);
   const mapRef = useRef<MapRef>(null);
+
+  // The station the views focus on: picked from the list or a marker, or by
+  // clicking its polygon
+  const focusStationId = selectedStationId ?? selectedPolygon?.stationId ?? null;
+  const setPolygonStationId = useUIStore((s) => s.setPolygonStationId);
+  useEffect(() => {
+    setPolygonStationId(selectedPolygon?.stationId ?? null);
+  }, [selectedPolygon, setPolygonStationId]);
 
   // Handle flyTo requests from UI (e.g. clicking station in top stations list)
   useEffect(() => {
@@ -98,6 +113,14 @@ export default function CoverageMap() {
       });
     }
   }, [pitch3d]);
+
+  // A shared link asks to fly before the map exists; do it once the map loads
+  const onLoad = useCallback(() => {
+    const target = useUIStore.getState().flyToTarget;
+    if (!target || !mapRef.current) return;
+    mapRef.current.jumpTo({ center: [target.longitude, target.latitude], zoom: target.zoom });
+    clearFlyTo();
+  }, [clearFlyTo]);
 
   const onMove = useCallback((evt: { viewState: typeof viewState }) => {
     setLocalViewState(evt.viewState);
@@ -180,20 +203,52 @@ export default function CoverageMap() {
     fetchStations();
   }, [fetchCoverage, fetchStations]);
 
+  // One station's reception density, for the Density view
+  // Only the newest density request may store its answer: a slower one for a
+  // station or window picked earlier must not replace it
+  const densityRequest = useRef(0);
+  const fetchDensity = useCallback(async () => {
+    if (focusStationId === null) return;
+    const request = ++densityRequest.current;
+    try {
+      const params = new URLSearchParams({ window: timeWindow });
+      if (transportFilter !== 'all') params.set('transport', transportFilter);
+      const res = await fetch(`${API_URL}/api/v1/coverage/stations/${focusStationId}/density?${params}`);
+      if (request !== densityRequest.current) return;
+      if (res.status === 404) {
+        setDensityData(null);
+        return;
+      }
+      if (!res.ok) return;
+      const data = await res.json();
+      if (request !== densityRequest.current) return;
+      setDensityData({ ...(data as StationDensity), window: timeWindow });
+    } catch { /* retry next interval */ }
+  }, [focusStationId, timeWindow, transportFilter, setDensityData]);
+
+  // Polygons are shown in the Polygons view and around the density
+  const wantsPolygons = mode !== 'hexgrid';
+  const wantsDensity = mode === 'density' && focusStationId !== null;
+
   // Fetch polygons when the view switches to polygons or the window/filter changes
   useEffect(() => {
-    if (mode === 'polygon') fetchPolygons();
-  }, [mode, fetchPolygons]);
+    if (wantsPolygons) fetchPolygons();
+  }, [wantsPolygons, fetchPolygons]);
+
+  useEffect(() => {
+    if (wantsDensity) fetchDensity();
+  }, [wantsDensity, fetchDensity]);
 
   // Periodic silent refresh
   useEffect(() => {
     const interval = setInterval(() => {
       fetchCoverage(true);
       fetchStations();
-      if (mode === 'polygon') fetchPolygons();
+      if (wantsPolygons) fetchPolygons();
+      if (wantsDensity) fetchDensity();
     }, POLL_INTERVAL);
     return () => clearInterval(interval);
-  }, [fetchCoverage, fetchStations, fetchPolygons, mode]);
+  }, [fetchCoverage, fetchStations, fetchPolygons, fetchDensity, wantsPolygons, wantsDensity]);
 
   // Stats on faster interval
   useEffect(() => {
@@ -204,20 +259,42 @@ export default function CoverageMap() {
 
   // ── Deck.gl layers ──
 
-  const selectedPolygonStationId = selectedPolygon?.stationId ?? null;
-  // Highlight the station marker for either direct station click or polygon click
-  const highlightedStationId = selectedStationId ?? selectedPolygonStationId;
+  // "Only selected station" applies once there is a station to show
+  const solo = onlySelected && focusStationId !== null;
 
   const layers = useMemo(() => {
     const result = [];
     if (mode === 'hexgrid') {
-      result.push(createHexGridLayer(hexData));
+      result.push(createHexGridLayer(
+        solo ? hexData.filter((c) => c.stationIds?.includes(focusStationId!)) : hexData,
+      ));
+    } else if (mode === 'polygon' || focusStationId === null) {
+      result.push(createPolygonLayer(
+        solo ? polygonData.filter((p) => p.stationId === focusStationId) : polygonData,
+        focusStationId,
+      ));
     } else {
-      result.push(createPolygonLayer(polygonData, selectedPolygonStationId));
+      // Density: the other stations stay as quiet, clickable context
+      if (!solo) {
+        result.push(createPolygonLayer(
+          polygonData.filter((p) => p.stationId !== focusStationId), null, true,
+        ));
+      }
+      // The station list follows the transport and mode filters: a station
+      // filtered out there shows no density either
+      const focusShown = stations.some((st) => st.id === focusStationId);
+      if (focusShown && densityData && densityData.stationId === focusStationId && densityData.window === timeWindow) {
+        result.push(createDensityLayer(densityData, densityStyle, lightBasemap));
+      }
+      const outline = polygonData.find((p) => p.stationId === focusStationId);
+      if (outline) result.push(createDensityOutlineLayer(outline, lightBasemap));
     }
-    result.push(createStationMarkersLayer(stations, highlightedStationId));
+    result.push(createStationMarkersLayer(
+      solo ? stations.filter((s) => s.id === focusStationId) : stations,
+      focusStationId,
+    ));
     return result;
-  }, [mode, hexData, polygonData, stations, highlightedStationId, selectedPolygonStationId]);
+  }, [mode, hexData, polygonData, densityData, densityStyle, lightBasemap, stations, focusStationId, solo, timeWindow]);
 
   const getTooltip = useCallback(({ object, layer }: PickingInfo) => {
     if (!object) return null;
@@ -245,6 +322,18 @@ export default function CoverageMap() {
       return { className: 'deck-tooltip', text: lines.join('\n') };
     }
 
+    if (layer?.id === 'coverage-density') {
+      const cell = object as ShadedCell;
+      const others = cell.stationCount - 1;
+      const width = H3_CELL_WIDTH_KM[useCoverageStore.getState().densityData?.resolution ?? 4];
+      const lines = [
+        `${cell.msgCount.toLocaleString()} message${cell.msgCount !== 1 ? 's' : ''} here`,
+        width ? `Cell about ${width} km wide` : null,
+        others > 0 ? `Also heard by ${others} other station${others !== 1 ? 's' : ''}` : 'Only this station hears here',
+      ].filter(Boolean);
+      return { className: 'deck-tooltip', text: lines.join('\n') };
+    }
+
     if (layer?.id === 'coverage-polygons') {
       const polygon = object as CoveragePolygon;
       return {
@@ -257,6 +346,11 @@ export default function CoverageMap() {
   }, []);
 
   const onClick = useCallback((info: PickingInfo) => {
+    // Showing one station: clicks on the map keep it (close its card or press
+    // Esc to pick another)
+    if (onlySelected && focusStationId !== null && info.layer?.id !== 'station-markers') return;
+    // A density cell belongs to the focused station; its tooltip says the rest
+    if (info.layer?.id === 'coverage-density') return;
     if (info.layer?.id === 'station-markers' && info.object) {
       selectStation((info.object as Station).id);
       setSelectedHex(null);
@@ -274,7 +368,7 @@ export default function CoverageMap() {
       setSelectedHex(null);
       setSelectedPolygon(null);
     }
-  }, [selectStation]);
+  }, [selectStation, onlySelected, focusStationId]);
 
   // Escape closes whichever detail popup is open
   useEffect(() => {
@@ -294,6 +388,7 @@ export default function CoverageMap() {
       <Map
         ref={mapRef}
         {...viewState}
+        onLoad={onLoad}
         onMove={onMove}
         onMoveEnd={onMoveEnd}
         mapStyle={mapStyleUrl}
