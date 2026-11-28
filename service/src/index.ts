@@ -21,7 +21,10 @@ async function main() {
   // 2. Start station metadata sync. Before the snapshots, because restoring a
   // station's coverage needs to know whether it is a marine or aircraft station,
   // and before NATS so trust checks work.
-  const stationSync = new StationSync(store.stationMap);
+  const stationSync = new StationSync(store.stationMap, (merges) => {
+    const folded = store.setStationMerges(merges);
+    if (folded > 0) console.log(`[StationSync] Folded ${folded} merged station(s) into the station they became`);
+  });
   await stationSync.start();
 
   // 3. Initialize database and load persisted data
