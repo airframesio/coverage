@@ -156,10 +156,12 @@ describe('request metrics', () => {
     await app.request('/api/v1/stats');
     await app.request('/api/v1/stats');
     await app.request('/api/v1/coverage/stations/12345');
+    await app.request('/api/v1/coverage/stations/12345/density');
     const text = await scrape();
     expect(sample(text, 'coverage_http_requests_total{route="stats",status="2xx",cache="miss"}')).toBeGreaterThanOrEqual(1);
     expect(sample(text, 'coverage_http_requests_total{route="stats",status="2xx",cache="hit"}')).toBeGreaterThanOrEqual(1);
     expect(sample(text, 'coverage_http_requests_total{route="coverage_station",status="4xx",cache="miss"}')).toBe(1);
+    expect(text).toMatch(/coverage_http_requests_total\{route="coverage_station_density",status="[245]xx",cache="[a-z]+"\} 1/);
     expect(text).toContain('coverage_http_request_duration_seconds_bucket{le="0.5",route="stats",cache="hit"}');
   });
 });
