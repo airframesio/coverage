@@ -6,6 +6,8 @@ import { useUIStore } from '@/lib/stores/ui-store';
 const SHORTCUTS = [
   { key: 'H', desc: 'Hex grid mode' },
   { key: 'P', desc: 'Polygon mode' },
+  { key: 'D', desc: 'Density mode' },
+  { key: 'S', desc: 'Only the selected station' },
   { key: 'F', desc: 'Fullscreen' },
   { key: '3', desc: '3D pitch toggle' },
   { key: '[ ,', desc: 'Shorter time window' },

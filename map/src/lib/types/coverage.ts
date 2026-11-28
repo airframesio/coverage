@@ -9,7 +9,27 @@ export interface CoverageHex {
   confidence: number;
   sources: string[];
   stationCount: number;
+  /** Stations that heard the cell */
+  stationIds?: number[];
   transportTypes: string[];
+}
+
+/** One cell of a station's density: the messages it received there */
+export interface DensityCell {
+  h3: string;
+  msgCount: number;
+  /** Stations that heard this cell, this one included */
+  stationCount: number;
+}
+
+export interface StationDensity {
+  stationId: number;
+  ident: string;
+  window: string;
+  resolution: number;
+  maxCount: number;
+  totalMessages: number;
+  cells: DensityCell[];
 }
 
 export interface CoveragePolygon {

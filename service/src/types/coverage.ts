@@ -19,8 +19,11 @@ export interface CellAggregation {
   sources: number;
   /** The source first recorded for the cell (interned index + 1, 0 when none). Sets the calibration. */
   primarySource: number;
-  /** One station id, or a set once several stations have reported the cell */
-  stationIds: number | Set<number>;
+  /**
+   * One station id, or once several stations have reported the cell, each
+   * station's message count in it (for the per-station density view)
+   */
+  stationIds: number | Map<number, number>;
   /** Bitmask of transport types */
   transportTypes: number;
 }
@@ -36,6 +39,11 @@ export interface CellResponse {
   sources: string[];
   stationCount: number;
   stationIds: number[];
+  /**
+   * Snapshots only: each station's messages in the cell, in the order of
+   * stationIds, when more than one station reported it
+   */
+  stationMsgCounts?: number[];
   transportTypes: string[];
 }
 

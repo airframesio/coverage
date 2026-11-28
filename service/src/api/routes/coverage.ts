@@ -100,6 +100,71 @@ coverageRoutes.get('/polygons', (c) => {
   return c.json({ window: windowName, count: polygons.length, polygons });
 });
 
+/** Density grid per window: fine enough to show structure inside a station's range */
+function densityResolution(windowIndex: number): number {
+  if (windowIndex <= WINDOW_CONFIGS.findIndex(w => w.name === '1h')) return 5;
+  if (windowIndex <= WINDOW_CONFIGS.findIndex(w => w.name === '24h')) return 4;
+  return 3;
+}
+
+/**
+ * GET /api/v1/coverage/stations/:id/density — Where one station hears: its
+ * messages per H3 cell (positions it received) over the window, for the map's
+ * Density view. `stationCount` says how many stations heard the cell.
+ */
+coverageRoutes.get('/stations/:id/density', (c) => {
+  const store = c.get('store');
+  const stationId = parseInt(c.req.param('id'), 10);
+  const windowName = c.req.query('window') ?? '1h';
+  const transportRaw = c.req.query('transport');
+  const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
+  const transportFilter = transportRaw && validTransports.includes(transportRaw)
+    ? transportRaw as TransportType
+    : undefined;
+
+  if (!Number.isInteger(stationId) || stationId < 1) {
+    return c.json({ error: 'Invalid station ID' }, 400);
+  }
+  const windowIndex = WINDOW_CONFIGS.findIndex(w => w.name === windowName);
+  if (windowIndex === -1) {
+    return c.json({ error: `Invalid window: ${windowName}` }, 400);
+  }
+  const station = store.stationMap.get(stationId);
+  if (!station) {
+    return c.json({ error: 'Station not found' }, 404);
+  }
+
+  const requested = c.req.query('resolution');
+  let resolution = densityResolution(windowIndex);
+  if (requested !== undefined) {
+    const r = parseInt(requested, 10);
+    if (!(r >= 2 && r <= 6)) {
+      return c.json({ error: `Invalid resolution: ${requested}. Must be 2-6.` }, 400);
+    }
+    resolution = r;
+  }
+  resolution = finestResolutionFor(resolution, windowIndex);
+
+  const cells = store.getStationDensity(stationId, resolution, windowName, transportFilter);
+  let maxCount = 0;
+  let totalMessages = 0;
+  for (const cell of cells) {
+    totalMessages += cell.msgCount;
+    if (cell.msgCount > maxCount) maxCount = cell.msgCount;
+  }
+
+  return c.json({
+    stationId,
+    ident: station.ident,
+    window: windowName,
+    resolution,
+    cellCount: cells.length,
+    maxCount,
+    totalMessages,
+    cells,
+  });
+});
+
 /** GET /api/v1/coverage/stations/:id — Single station directional coverage */
 coverageRoutes.get('/stations/:id', (c) => {
   const store = c.get('store');

@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { Station, BearingSector } from '@/lib/types/coverage';
 import { sourceColor } from '@/lib/constants/colors';
 import { useUIStore } from '@/lib/stores/ui-store';
+import OnlySelectedToggle from '@/components/controls/OnlySelectedToggle';
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
 
@@ -35,7 +36,7 @@ export default function StationPopup({ station, onClose }: Props) {
 
   return (
     <div
-      className="absolute bottom-4 left-4 z-10 w-80 rounded-2xl border shadow-2xl p-4"
+      className="absolute bottom-4 left-4 z-10 w-[calc(100%-2rem)] sm:w-80 rounded-2xl border shadow-2xl p-4"
       style={{
         background: 'var(--panel-bg)',
         borderColor: 'var(--panel-border)',
@@ -74,7 +75,8 @@ export default function StationPopup({ station, onClose }: Props) {
 
       {/* Polar coverage mini-chart */}
       {sectors && sectors.some(s => s.distance > 0) && (
-        <div className="mt-3 pt-3 border-t border-zinc-800/50">
+        // Left out on phones, where the card would cover most of the map
+        <div className="mt-3 pt-3 border-t border-zinc-800/50 max-sm:hidden">
           <div className="flex items-center justify-between mb-2">
             <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
               Directional Range
@@ -92,6 +94,8 @@ export default function StationPopup({ station, onClose }: Props) {
           ID: {station.id}
         </span>
       </div>
+
+      <OnlySelectedToggle hasStation compact />
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { cellToBoundary } from 'h3-js';
 import type { CoverageHex, CoveragePolygon, Station } from './types/coverage';
 
 interface ExportInput {
-  mode: 'hexgrid' | 'polygon';
+  mode: 'hexgrid' | 'polygon' | 'density';
   timeWindow: string;
   transportFilter: string;
   hexData: CoverageHex[];
@@ -12,7 +12,8 @@ interface ExportInput {
 
 /**
  * Build a GeoJSON FeatureCollection of what the map is currently showing:
- * the coverage layer for the active mode (H3 cells or per-station polygons)
+ * the coverage layer for the active mode (H3 cells, or per-station polygons
+ * in the Polygons and Density views)
  * plus every station with a known position.
  */
 export function buildCoverageGeoJSON({

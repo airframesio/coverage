@@ -1,9 +1,9 @@
 import {
   SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellHasFamily, cellStationIds, cellTransportTypes,
-  cellHasTransport, addCellSource, addCellStation, addCellTransport,
+  cellHasTransport, addCellSource, setCellStations, addCellTransport, cellStationCount,
 } from './sliding-window.js';
 import { StationSlidingWindow, type SavedStationSliceEntry } from './station-window.js';
-import { cellArea } from 'h3-js';
+import { cellArea, latLngToCell } from 'h3-js';
 import { indexPoint, shouldMaintainResolution } from '../compute/h3-indexer.js';
 import { haversineDistance, bearing, bearingToSector } from '../compute/distance.js';
 import { computeConfidence, maxRangeKm } from '../compute/signal-analysis.js';
@@ -28,8 +28,11 @@ const HEARD_MOVE_KM = 25;
 const AREA_RESOLUTION = 3;
 
 /** A cell as the API and snapshots give it */
-function cellResponse(h3: string, cell: CellAggregation, confidence: number): CellResponse {
+function cellResponse(h3: string, cell: CellAggregation, confidence: number, withStationCounts = false): CellResponse {
   const stationIds = cellStationIds(cell);
+  const counts = withStationCounts && typeof cell.stationIds !== 'number'
+    ? stationIds.map(id => cellStationCount(cell, id))
+    : undefined;
   return {
     h3,
     msgCount: cell.messageCount,
@@ -40,6 +43,7 @@ function cellResponse(h3: string, cell: CellAggregation, confidence: number): Ce
     sources: cellSources(cell),
     stationCount: stationIds.length,
     stationIds,
+    ...(counts ? { stationMsgCounts: counts } : {}),
     transportTypes: cellTransportTypes(cell),
   };
 }
@@ -526,7 +530,7 @@ export class CoverageStore {
     return window.slicesByAge().map(({ startedAt, current, slice }) => {
       const cells: CellResponse[] = [];
       for (const [h3, cell] of slice) {
-        if (cell.messageCount > 0) cells.push(cellResponse(h3, cell, computeConfidence(cell)));
+        if (cell.messageCount > 0) cells.push(cellResponse(h3, cell, computeConfidence(cell), true));
       }
       return { startedAt, current, cells };
     });
@@ -652,6 +656,49 @@ export class CoverageStore {
     return Math.round(area);
   }
 
+  /**
+   * Where one station hears: its messages per H3 cell over a window. Walks the
+   * window's slices once for this station only (no merged copy of the grid).
+   * Messages without a position are filed in the station's own cell; they are
+   * taken out again so the station itself does not show as the hot spot.
+   */
+  getStationDensity(
+    stationId: number, resolution: number, windowName: string, transportType?: TransportType,
+  ): { h3: string; msgCount: number; stationCount: number }[] {
+    const ri = H3_RESOLUTION_CONFIGS.findIndex(c => c.resolution === resolution);
+    const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
+    if (ri === -1 || wi === -1 || !shouldMaintainResolution(resolution, wi)) return [];
+
+    const counts = new Map<string, { msgCount: number; stationCount: number }>();
+    this.windows[ri][wi].forEachCell((h3, cell) => {
+      const n = cellStationCount(cell, stationId);
+      if (n === 0) return;
+      if (transportType && !cellHasTransport(cell, transportType)) return;
+      const stationsHere = typeof cell.stationIds === 'number' ? 1 : cell.stationIds.size;
+      const entry = counts.get(h3);
+      if (entry) {
+        entry.msgCount += n;
+        if (stationsHere > entry.stationCount) entry.stationCount = stationsHere;
+      } else {
+        counts.set(h3, { msgCount: n, stationCount: stationsHere });
+      }
+    }, WINDOW_CONFIGS[wi].viewSlices);
+
+    const station = this.stationMap.get(stationId);
+    if (station && !(station.latitude === 0 && station.longitude === 0)) {
+      const coverage = this.getStationCoverage(stationId, windowName, transportType);
+      const withoutPosition = coverage ? coverage.totalMessages - coverage.messagesWithPosition : 0;
+      const own = withoutPosition > 0 ? latLngToCell(station.latitude, station.longitude, resolution) : null;
+      const entry = own ? counts.get(own) : undefined;
+      if (own && entry) {
+        entry.msgCount -= withoutPosition;
+        if (entry.msgCount <= 0) counts.delete(own);
+      }
+    }
+
+    return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stationCount }));
+  }
+
   /** Cells of one resolution merged across a window's slices */
   private aggregated(ri: number, wi: number): Map<string, CellAggregation> {
     return this.windows[ri][wi].getAggregated(WINDOW_CONFIGS[wi].viewSlices);
@@ -748,9 +795,7 @@ export class CoverageStore {
       }
       newCell.errorMessages = Math.round(cell.errorRate * cell.msgCount);
       for (const src of cell.sources) addCellSource(newCell, src);
-      if (cell.stationIds) {
-        for (const sid of cell.stationIds) addCellStation(newCell, sid);
-      }
+      if (cell.stationIds) setCellStations(newCell, cell.stationIds, cell.stationMsgCounts);
       for (const tt of cell.transportTypes) addCellTransport(newCell, tt as TransportType);
       slice.set(cell.h3, newCell);
     }

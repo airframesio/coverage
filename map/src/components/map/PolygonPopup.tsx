@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import type { CoveragePolygon, BearingSector } from '@/lib/types/coverage';
 import { sourceColor } from '@/lib/constants/colors';
 import { useUIStore } from '@/lib/stores/ui-store';
+import OnlySelectedToggle from '@/components/controls/OnlySelectedToggle';
 
 const API_URL = process.env.NEXT_PUBLIC_COVERAGE_API_URL || 'http://localhost:3002';
 
@@ -49,7 +50,7 @@ export default function PolygonPopup({ polygon, onClose }: Props) {
 
   return (
     <div
-      className="absolute bottom-4 left-4 z-10 w-80 rounded-2xl border shadow-2xl p-4"
+      className="absolute bottom-4 left-4 z-10 w-[calc(100%-2rem)] sm:w-80 rounded-2xl border shadow-2xl p-4"
       style={{
         background: 'var(--panel-bg)',
         borderColor: 'var(--panel-border)',
@@ -147,6 +148,8 @@ export default function PolygonPopup({ polygon, onClose }: Props) {
           Window: {timeWindow}
         </span>
       </div>
+
+      <OnlySelectedToggle hasStation compact />
     </div>
   );
 }

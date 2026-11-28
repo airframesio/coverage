@@ -69,6 +69,13 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   polygon in one answer) every 10 s; it used to make one request per station.
   `coverage_http_requests_total` / `coverage_http_request_duration_seconds`
   (labels route, status, cache) show which requests keep the thread busy.
+- A cell reported by several stations keeps each one's message count
+  (`stationIds` becomes a Map; one station stays a plain number), so
+  `/api/v1/coverage/stations/:id/density` can give a station's own messages per
+  cell (res 5 up to 1h, 4 up to 24h, 3 beyond). It walks the window's slices for
+  that station only and takes the station's messages without a position back out
+  of its own cell. Snapshots save the counts as `stationMsgCounts` (older ones
+  are shared out evenly on restore).
 - `modes=acars,vdl,...` (families from src/compute/source-family.ts) filters
   `/coverage/h3`, `/coverage/polygons` and `/stations`. Stations and polygons go by the
   station's source type; a hex cell is kept when any source that heard it is of a

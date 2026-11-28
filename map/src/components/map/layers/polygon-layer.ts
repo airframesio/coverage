@@ -2,9 +2,14 @@ import { PolygonLayer } from '@deck.gl/layers';
 import { stationHue, hslToRgba } from '@/lib/constants/colors';
 import type { CoveragePolygon } from '@/lib/types/coverage';
 
+/**
+ * @param faded - draw the polygons as quiet context (Density view, where they
+ *   sit around the focused station's density and can be clicked to switch)
+ */
 export function createPolygonLayer(
   data: CoveragePolygon[],
   selectedStationId: number | null = null,
+  faded = false,
 ) {
   return new PolygonLayer<CoveragePolygon>({
     id: 'coverage-polygons',
@@ -16,9 +21,10 @@ export function createPolygonLayer(
     wireframe: true,
     getPolygon: (d) => d.coordinates[0],
     getElevation: (d) =>
-      d.stationId === selectedStationId ? 800 : 0,
+      !faded && d.stationId === selectedStationId ? 800 : 0,
     getFillColor: (d) => {
       const hue = stationHue(d.stationId);
+      if (faded) return hslToRgba(hue, 40, 50, 16);
       if (d.stationId === selectedStationId) {
         return hslToRgba(hue, 80, 60, 160);
       }
@@ -26,14 +32,15 @@ export function createPolygonLayer(
     },
     getLineColor: (d) => {
       const hue = stationHue(d.stationId);
+      if (faded) return hslToRgba(hue, 45, 60, 110);
       if (d.stationId === selectedStationId) {
         return hslToRgba(hue, 90, 75, 255);
       }
       return hslToRgba(hue, 75, 60, 220);
     },
     getLineWidth: (d) =>
-      d.stationId === selectedStationId ? 4 : 2,
-    lineWidthMinPixels: 1.5,
+      !faded && d.stationId === selectedStationId ? 4 : faded ? 1 : 2,
+    lineWidthMinPixels: faded ? 1 : 1.5,
     lineWidthMaxPixels: 6,
     elevationScale: 1,
     // Only transition elevation on selection change — no transitions on data refresh
@@ -41,10 +48,10 @@ export function createPolygonLayer(
       getElevation: { duration: 400 },
     },
     updateTriggers: {
-      getFillColor: [selectedStationId],
-      getLineColor: [selectedStationId],
-      getElevation: [selectedStationId],
-      getLineWidth: [selectedStationId],
+      getFillColor: [selectedStationId, faded],
+      getLineColor: [selectedStationId, faded],
+      getElevation: [selectedStationId, faded],
+      getLineWidth: [selectedStationId, faded],
     },
   });
 }

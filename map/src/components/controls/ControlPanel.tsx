@@ -13,6 +13,7 @@ import MapStyleSwitcher from './MapStyleSwitcher';
 import StatsBar from './StatsBar';
 import TransportFilter from './TransportFilter';
 import TopStations from './TopStations';
+import OnlySelectedToggle from './OnlySelectedToggle';
 import { buildCoverageGeoJSON } from '@/lib/export-geojson';
 
 export default function ControlPanel() {
@@ -30,6 +31,8 @@ export default function ControlPanel() {
   const togglePitch3d = useUIStore((s) => s.togglePitch3d);
   const helpOpen = useUIStore((s) => s.helpOpen);
   const toggleHelp = useUIStore((s) => s.toggleHelp);
+  const toggleOnlySelected = useUIStore((s) => s.toggleOnlySelected);
+  const hasStation = useUIStore((s) => s.selectedStationId !== null || s.polygonStationId !== null);
 
   // Export what is currently on the map: hex cells or station polygons
   // (depending on mode) plus the station markers.
@@ -57,6 +60,8 @@ export default function ControlPanel() {
       switch (e.key) {
         case 'h': setMode('hexgrid'); break;
         case 'p': setMode('polygon'); break;
+        case 'd': setMode('density'); break;
+        case 's': toggleOnlySelected(); break;
         case 'f': toggleFullscreen(); break;
         case '3': togglePitch3d(); break;
         case 'Escape': selectStation(null); break;
@@ -74,7 +79,7 @@ export default function ControlPanel() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [setMode, timeWindow, setTimeWindow, selectStation, toggleFullscreen, togglePitch3d]);
+  }, [setMode, timeWindow, setTimeWindow, selectStation, toggleFullscreen, togglePitch3d, toggleOnlySelected]);
 
   if (fullscreen) {
     // Minimal UI in fullscreen: just the logo and an exit hint
@@ -188,17 +193,21 @@ export default function ControlPanel() {
           {!panelCollapsed && (
             <>
               <ModeToggle />
+              <OnlySelectedToggle hasStation={hasStation} />
               <TransportFilter />
               <ModeFilter />
               <TimeSlider />
-              <CoverageLegend />
+              <CoverageLegend hasStation={hasStation} />
               <MapStyleSwitcher />
             </>
           )}
         </div>
 
-        <StatsBar />
-        <TopStations />
+        {/* On phones a selected station's card takes their place */}
+        <div className={`flex flex-col gap-3 ${hasStation ? 'max-sm:hidden' : ''}`}>
+          <StatsBar />
+          <TopStations />
+        </div>
       </div>
     </>
   );
