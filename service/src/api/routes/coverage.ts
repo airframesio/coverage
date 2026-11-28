@@ -108,6 +108,47 @@ function densityResolution(windowIndex: number): number {
 }
 
 /**
+ * GET /api/v1/coverage/density — Where all stations hear together: messages
+ * with a position per H3 cell over the window, for the Density view when no
+ * station is picked. Same grid as a station's density; `transport` and `modes`
+ * filter cells like /coverage/h3.
+ */
+coverageRoutes.get('/density', (c) => {
+  const store = c.get('store');
+  const windowName = c.req.query('window') ?? '1h';
+  const transportRaw = c.req.query('transport');
+  const validTransports = ['aircraft', 'marine', 'sonde', 'space'];
+  const transportType = transportRaw && validTransports.includes(transportRaw)
+    ? transportRaw as TransportType
+    : undefined;
+  const modes = parseModes(c.req.query('modes'));
+
+  const windowIndex = WINDOW_CONFIGS.findIndex(w => w.name === windowName);
+  if (windowIndex === -1) {
+    return c.json({ error: `Invalid window: ${windowName}` }, 400);
+  }
+  const requested = c.req.query('resolution');
+  let resolution = densityResolution(windowIndex);
+  if (requested !== undefined) {
+    const r = parseInt(requested, 10);
+    if (!(r >= 2 && r <= 6)) {
+      return c.json({ error: `Invalid resolution: ${requested}. Must be 2-6.` }, 400);
+    }
+    resolution = r;
+  }
+  resolution = finestResolutionFor(resolution, windowIndex);
+
+  const cells = store.getDensity(resolution, windowName, { transportType, modes });
+  let maxCount = 0;
+  let totalMessages = 0;
+  for (const cell of cells) {
+    totalMessages += cell.msgCount;
+    if (cell.msgCount > maxCount) maxCount = cell.msgCount;
+  }
+  return c.json({ window: windowName, resolution, cellCount: cells.length, maxCount, totalMessages, cells });
+});
+
+/**
  * GET /api/v1/coverage/stations/:id/density — Where one station hears: its
  * messages per H3 cell (positions it received) over the window, for the map's
  * Density view. `stationCount` says how many stations heard the cell.

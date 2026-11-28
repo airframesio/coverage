@@ -2,6 +2,7 @@
 
 import { useUIStore } from '@/lib/stores/ui-store';
 import { useCoverageStore } from '@/lib/stores/coverage-store';
+import { modesParam } from '@/lib/constants/modes';
 import {
   DENSITY_BANDS, DENSITY_COLORS, DENSITY_GRADIENT, H3_CELL_WIDTH_KM, densityCountAt, type DensityStyle,
 } from '@/lib/constants/density';
@@ -28,9 +29,17 @@ function DensityLegend({ hasStation }: { hasStation: boolean }) {
   const timeWindow = useUIStore((s) => s.timeWindow);
 
   const focusStationId = useUIStore((s) => s.selectedStationId ?? s.polygonStationId);
-  const data = densityData && densityData.window === timeWindow && densityData.stationId === focusStationId
+  const allDensityData = useCoverageStore((s) => s.allDensityData);
+  const transportFilter = useUIStore((s) => s.transportFilter);
+  const selectedModes = useUIStore((s) => s.modes);
+  const allKey = `${timeWindow}|${transportFilter}|${modesParam(selectedModes, transportFilter) ?? ''}`;
+  const stationData = hasStation && densityData && densityData.window === timeWindow && densityData.stationId === focusStationId
     ? densityData
     : null;
+  const allData = !hasStation && allDensityData && allDensityData.key === allKey && allDensityData.cells.length > 0
+    ? allDensityData
+    : null;
+  const data = stationData ?? allData;
   const max = data?.maxCount ?? 0;
   const width = data ? H3_CELL_WIDTH_KM[data.resolution] : undefined;
   const bandStops = Array.from({ length: DENSITY_BANDS }, (_, i) => {
@@ -78,12 +87,13 @@ function DensityLegend({ hasStation }: { hasStation: boolean }) {
       </div>
       {hasStation ? (
         <p className="text-xs text-zinc-500">
-          Messages {data ? <>from <span className="font-mono text-zinc-400">{data.ident}</span></> : 'from the station'} per
+          Messages {stationData ? <>from <span className="font-mono text-zinc-400">{stationData.ident}</span></> : 'from the station'} per
           {width ? ` ${width} km` : ''} cell, log scale. Empty inside the outline means nothing was heard there.
         </p>
       ) : (
-        <p className="text-xs text-amber-300/80">
-          Select a station (its polygon, marker or a row in the list) to see where it hears most.
+        <p className="text-xs text-zinc-500">
+          Messages from all stations per{width ? ` ${width} km` : ''} cell, log scale. Select a station
+          (its marker or a row in the list) to see only where it hears.
         </p>
       )}
     </div>

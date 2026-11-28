@@ -76,6 +76,9 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   that station only. Messages without a position are filed in the station's own
   cell and also counted there per station (`positionless`, only on those cells),
   so density leaves exactly them out, wherever the station was when they came in.
+  `/api/v1/coverage/density` is the same for all stations together (one pass,
+  each cell's messages minus its positionless ones; `transport` and `modes`
+  filter cells like `/coverage/h3`), for the Density view with no station.
   Snapshots save the counts as `stationMsgCounts` and `stationPositionless`;
   older ones share counts out evenly, and a slice restored without
   `stationPositionless` leaves out the cell at the station's location.

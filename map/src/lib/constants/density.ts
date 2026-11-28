@@ -90,3 +90,4 @@ export function shadeDensity(cells: DensityCell[], maxCount: number): ShadedCell
     return { ...c, t: Math.min(1, Math.max(0, sum / weight / maxLog)) };
   });
 }
+

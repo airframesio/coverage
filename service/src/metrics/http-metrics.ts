@@ -5,6 +5,7 @@ import { Counter, Histogram, type Registry } from 'prom-client';
 export function routeName(path: string): string {
   if (path === '/api/v1/coverage/h3') return 'coverage_h3';
   if (path === '/api/v1/coverage/polygons') return 'coverage_polygons';
+  if (path === '/api/v1/coverage/density') return 'coverage_density';
   if (path.startsWith('/api/v1/coverage/stations/')) {
     return path.endsWith('/density') ? 'coverage_station_density' : 'coverage_station';
   }

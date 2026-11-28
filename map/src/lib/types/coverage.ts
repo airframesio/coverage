@@ -32,6 +32,16 @@ export interface StationDensity {
   cells: DensityCell[];
 }
 
+/** Every station's density together (Density view with no station picked) */
+export interface AllDensity {
+  /** The request it answers: window, transport and modes */
+  key: string;
+  resolution: number;
+  maxCount: number;
+  totalMessages: number;
+  cells: DensityCell[];
+}
+
 export interface CoveragePolygon {
   stationId: number;
   ident: string;
