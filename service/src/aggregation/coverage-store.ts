@@ -1,6 +1,6 @@
 import {
   SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellHasFamily, cellStationIds, cellTransportTypes,
-  cellHasTransport, addCellSource, setCellStations, addCellTransport, cellStationCount,
+  cellHasTransport, addCellSource, setCellStations, addCellTransport, cellStationCount, cellStationPositioned, addCellPositionless,
 } from './sliding-window.js';
 import { StationSlidingWindow, type SavedStationSliceEntry } from './station-window.js';
 import { cellArea, latLngToCell } from 'h3-js';
@@ -44,6 +44,9 @@ function cellResponse(h3: string, cell: CellAggregation, confidence: number, wit
     stationCount: stationIds.length,
     stationIds,
     ...(counts ? { stationMsgCounts: counts } : {}),
+    ...(withStationCounts && cell.positionless
+      ? { stationPositionless: stationIds.map(id => cell.positionless!.get(id) ?? 0) }
+      : {}),
     transportTypes: cellTransportTypes(cell),
   };
 }
@@ -278,6 +281,7 @@ export class CoverageStore {
             event.sourceType,
             event.stationId,
             event.transportType,
+            hasValidTarget,
           );
         }
       }
@@ -662,8 +666,9 @@ export class CoverageStore {
   /**
    * Where one station hears: its messages per H3 cell over a window. Walks the
    * window's slices once for this station only (no merged copy of the grid).
-   * Messages without a position are filed in the station's own cell; they are
-   * taken out again so the station itself does not show as the hot spot.
+   * Messages without a position are filed in the station's own cell and
+   * counted there separately, so they are left out and the station itself
+   * does not show as the hot spot.
    */
   getStationDensity(
     stationId: number, resolution: number, windowName: string, transportType?: TransportType,
@@ -680,9 +685,15 @@ export class CoverageStore {
       if (kind !== transportType) return [];
     }
 
+    // Slices restored from older snapshots do not say which messages had a
+    // position. Their cell at the station's location is left out instead.
+    const located = station && !(station.latitude === 0 && station.longitude === 0);
+    const own = located ? latLngToCell(station.latitude, station.longitude, resolution) : null;
+
     const counts = new Map<string, { msgCount: number; stations: Set<number> }>();
-    this.windows[ri][wi].forEachCell((h3, cell) => {
-      const n = cellStationCount(cell, stationId);
+    this.windows[ri][wi].forEachCell((h3, cell, positionlessUnknown) => {
+      if (positionlessUnknown && h3 === own) return;
+      const n = cellStationPositioned(cell, stationId);
       if (n === 0) return;
       let entry = counts.get(h3);
       if (!entry) {
@@ -693,17 +704,6 @@ export class CoverageStore {
       // Distinct stations across the slices, not the most in any one slice
       for (const id of cellStationIds(cell)) entry.stations.add(id);
     }, WINDOW_CONFIGS[wi].viewSlices);
-
-    if (station && !(station.latitude === 0 && station.longitude === 0)) {
-      const coverage = this.getStationCoverage(stationId, windowName, transportType);
-      const withoutPosition = coverage ? coverage.totalMessages - coverage.messagesWithPosition : 0;
-      const own = withoutPosition > 0 ? latLngToCell(station.latitude, station.longitude, resolution) : null;
-      const entry = own ? counts.get(own) : undefined;
-      if (own && entry) {
-        entry.msgCount -= withoutPosition;
-        if (entry.msgCount <= 0) counts.delete(own);
-      }
-    }
 
     return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stations.size }));
   }
@@ -792,6 +792,10 @@ export class CoverageStore {
       current = target.current;
     }
 
+    // Snapshots from before positionless messages were counted per cell carry
+    // none at all (every slice of a live station has some)
+    if (cells.length > 0 && !cells.some(c => c.stationPositionless)) window.markPositionlessUnknown(slice);
+
     for (const cell of cells) {
       const existing = slice.get(cell.h3);
       if (existing) continue; // Don't overwrite live data
@@ -805,6 +809,12 @@ export class CoverageStore {
       newCell.errorMessages = Math.round(cell.errorRate * cell.msgCount);
       for (const src of cell.sources) addCellSource(newCell, src);
       if (cell.stationIds) setCellStations(newCell, cell.stationIds, cell.stationMsgCounts);
+      if (cell.stationIds && cell.stationPositionless?.length === cell.stationIds.length) {
+        cell.stationIds.forEach((id, i) => {
+          const n = Math.floor(cell.stationPositionless![i]) || 0;
+          if (Number.isInteger(id) && id !== 0 && n > 0) addCellPositionless(newCell, id, n);
+        });
+      }
       for (const tt of cell.transportTypes) addCellTransport(newCell, tt as TransportType);
       slice.set(cell.h3, newCell);
     }

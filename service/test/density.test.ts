@@ -142,6 +142,51 @@ describe('GET /api/v1/coverage/stations/:id/density', () => {
     expect(aircraft.totalMessages).toBe(22);
   });
 
+  it('keeps positioned messages in the station\'s own cell, also after the station moves', () => {
+    const s = new CoverageStore();
+    s.stationMap.set(7, station(7, 50.03, 8.57));
+    const home = latLngToCell(50.03, 8.57, 5);
+    for (let i = 0; i < 50; i++) s.ingest(event(7, null, null));
+    for (let i = 0; i < 3; i++) s.ingest(event(7, 50.03, 8.57));
+    // Moved (as placeByHeard does): new positionless messages land in the new cell
+    s.stationMap.get(7)!.latitude = 52.0;
+    s.stationMap.get(7)!.longitude = 13.0;
+    for (let i = 0; i < 40; i++) s.ingest(event(7, null, null));
+    for (let i = 0; i < 4; i++) s.ingest(event(7, 52.0, 13.0));
+    const cells = s.getStationDensity(7, 5, '1h');
+    s.destroy();
+    expect(new Map(cells.map(c => [c.h3, c.msgCount]))).toEqual(new Map([
+      [home, 3], [latLngToCell(52.0, 13.0, 5), 4],
+    ]));
+  });
+
+  it('saves positionless counts in snapshots; older snapshots leave the own cell out', () => {
+    const s = new CoverageStore();
+    s.stationMap.set(8, station(8, 50.03, 8.57));
+    const home = latLngToCell(50.03, 8.57, 5);
+    for (let i = 0; i < 30; i++) s.ingest(event(8, null, null));
+    for (let i = 0; i < 2; i++) s.ingest(event(8, 50.03, 8.57));
+    for (let i = 0; i < 5; i++) s.ingest(event(8, 50.5, 9.0));
+    const [slice] = s.getH3Slices(5, '1h');
+    s.destroy();
+    const saved = slice.cells.find(c => c.h3 === home)!;
+    expect(saved.stationPositionless).toEqual([30]);
+
+    const restore = (cells: typeof slice.cells) => {
+      const r = new CoverageStore();
+      r.stationMap.set(8, station(8, 50.03, 8.57));
+      r.loadH3Snapshot('1h', 5, cells, slice.startedAt);
+      const out = new Map(r.getStationDensity(8, 5, '1h').map(c => [c.h3, c.msgCount]));
+      r.destroy();
+      return out;
+    };
+    expect(restore(slice.cells).get(home)).toBe(2);
+    const legacy = slice.cells.map(({ stationPositionless: _, ...c }) => c);
+    const old = restore(legacy);
+    expect(old.has(home)).toBe(false);
+    expect(old.get(latLngToCell(50.5, 9.0, 5))).toBe(5);
+  });
+
   it('rejects bad input', async () => {
     expect((await app.request('/api/v1/coverage/stations/x/density')).status).toBe(400);
     expect((await app.request('/api/v1/coverage/stations/1/density?window=nope')).status).toBe(400);

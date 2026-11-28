@@ -73,9 +73,12 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   (`stationIds` becomes a Map; one station stays a plain number), so
   `/api/v1/coverage/stations/:id/density` can give a station's own messages per
   cell (res 5 up to 1h, 4 up to 24h, 3 beyond). It walks the window's slices for
-  that station only and takes the station's messages without a position back out
-  of its own cell. Snapshots save the counts as `stationMsgCounts` (older ones
-  are shared out evenly on restore).
+  that station only. Messages without a position are filed in the station's own
+  cell and also counted there per station (`positionless`, only on those cells),
+  so density leaves exactly them out, wherever the station was when they came in.
+  Snapshots save the counts as `stationMsgCounts` and `stationPositionless`;
+  older ones share counts out evenly, and a slice restored without
+  `stationPositionless` leaves out the cell at the station's location.
 - `modes=acars,vdl,...` (families from src/compute/source-family.ts) filters
   `/coverage/h3`, `/coverage/polygons` and `/stations`. Stations and polygons go by the
   station's source type; a hex cell is kept when any source that heard it is of a
