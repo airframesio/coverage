@@ -1,5 +1,5 @@
 import { cellToBoundary } from 'h3-js';
-import type { CoverageHex, CoveragePolygon, Station } from './types/coverage';
+import type { CoverageHex, CoveragePolygon, Station, StationDensity } from './types/coverage';
 
 interface ExportInput {
   mode: 'hexgrid' | 'polygon' | 'density';
@@ -8,6 +8,8 @@ interface ExportInput {
   hexData: CoverageHex[];
   polygonData: CoveragePolygon[];
   stations: Station[];
+  /** The focused station's density (Density view), when loaded */
+  densityData?: StationDensity | null;
 }
 
 /**
@@ -17,8 +19,21 @@ interface ExportInput {
  * plus every station with a known position.
  */
 export function buildCoverageGeoJSON({
-  mode, timeWindow, transportFilter, hexData, polygonData, stations,
+  mode, timeWindow, transportFilter, hexData, polygonData, stations, densityData,
 }: ExportInput) {
+  const densityCells = mode === 'density' && densityData
+    ? densityData.cells.map((cell) => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Polygon' as const, coordinates: [cellToBoundary(cell.h3, true)] },
+        properties: {
+          type: 'station-density',
+          h3: cell.h3,
+          stationId: densityData.stationId,
+          messageCount: cell.msgCount,
+          stationCount: cell.stationCount,
+        },
+      }))
+    : [];
   const coverage = mode === 'hexgrid'
     ? hexData.map((hex) => ({
         type: 'Feature' as const,
@@ -79,6 +94,6 @@ export function buildCoverageGeoJSON({
       window: timeWindow,
       transport: transportFilter,
     },
-    features: [...coverage, ...stationFeatures],
+    features: [...densityCells, ...coverage, ...stationFeatures],
   };
 }

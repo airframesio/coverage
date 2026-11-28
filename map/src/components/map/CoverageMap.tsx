@@ -204,18 +204,24 @@ export default function CoverageMap() {
   }, [fetchCoverage, fetchStations]);
 
   // One station's reception density, for the Density view
+  // Only the newest density request may store its answer: a slower one for a
+  // station or window picked earlier must not replace it
+  const densityRequest = useRef(0);
   const fetchDensity = useCallback(async () => {
     if (focusStationId === null) return;
+    const request = ++densityRequest.current;
     try {
       const params = new URLSearchParams({ window: timeWindow });
       if (transportFilter !== 'all') params.set('transport', transportFilter);
       const res = await fetch(`${API_URL}/api/v1/coverage/stations/${focusStationId}/density?${params}`);
+      if (request !== densityRequest.current) return;
       if (res.status === 404) {
         setDensityData(null);
         return;
       }
       if (!res.ok) return;
       const data = await res.json();
+      if (request !== densityRequest.current) return;
       setDensityData({ ...(data as StationDensity), window: timeWindow });
     } catch { /* retry next interval */ }
   }, [focusStationId, timeWindow, transportFilter, setDensityData]);
@@ -274,7 +280,10 @@ export default function CoverageMap() {
           polygonData.filter((p) => p.stationId !== focusStationId), null, true,
         ));
       }
-      if (densityData && densityData.stationId === focusStationId && densityData.window === timeWindow) {
+      // The station list follows the transport and mode filters: a station
+      // filtered out there shows no density either
+      const focusShown = stations.some((st) => st.id === focusStationId);
+      if (focusShown && densityData && densityData.stationId === focusStationId && densityData.window === timeWindow) {
         result.push(createDensityLayer(densityData, densityStyle, lightBasemap));
       }
       const outline = polygonData.find((p) => p.stationId === focusStationId);

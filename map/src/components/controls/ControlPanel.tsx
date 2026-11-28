@@ -37,10 +37,19 @@ export default function ControlPanel() {
   // Export what is currently on the map: hex cells or station polygons
   // (depending on mode) plus the station markers.
   const exportGeoJSON = () => {
-    const { hexData, polygonData, stations } = useCoverageStore.getState();
-    const { mode, transportFilter } = useUIStore.getState();
+    const { hexData, polygonData, stations, densityData } = useCoverageStore.getState();
+    const { mode, transportFilter, onlySelected, selectedStationId, polygonStationId } = useUIStore.getState();
+    // Same rules as the map: only the focused station when that is on
+    const focusId = selectedStationId ?? polygonStationId;
+    const solo = onlySelected && focusId !== null;
     const geojson = buildCoverageGeoJSON({
-      mode, timeWindow, transportFilter, hexData, polygonData, stations,
+      mode, timeWindow, transportFilter,
+      hexData: solo ? hexData.filter((c) => c.stationIds?.includes(focusId)) : hexData,
+      polygonData: solo ? polygonData.filter((p) => p.stationId === focusId) : polygonData,
+      stations: solo ? stations.filter((s) => s.id === focusId) : stations,
+      densityData: densityData && densityData.stationId === focusId && densityData.window === timeWindow
+        ? densityData
+        : null,
     });
     const blob = new Blob([JSON.stringify(geojson, null, 2)], { type: 'application/geo+json' });
     const url = URL.createObjectURL(blob);

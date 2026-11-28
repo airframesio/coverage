@@ -17,6 +17,7 @@ export function useUrlState() {
   const modes = useUIStore((s) => s.modes);
   const viewState = useUIStore((s) => s.viewState);
   const selectedStationId = useUIStore((s) => s.selectedStationId);
+  const polygonStationId = useUIStore((s) => s.polygonStationId);
   const onlySelected = useUIStore((s) => s.onlySelected);
   const selectStation = useUIStore((s) => s.selectStation);
   const setOnlySelected = useUIStore((s) => s.setOnlySelected);
@@ -79,9 +80,11 @@ export function useUrlState() {
       if (transportFilter !== 'all') params.set('transport', transportFilter);
       const modesValue = modesParam(modes, transportFilter);
       if (modesValue) params.set('modes', modesValue);
-      if (selectedStationId !== null) {
-        params.set('station', String(selectedStationId));
-        if (onlySelected) params.set('only', '1');
+      const stationId = selectedStationId ?? polygonStationId;
+      if (stationId !== null) {
+        params.set('station', String(stationId));
+        // Always say which: the recipient may have the other setting saved
+        params.set('only', onlySelected ? '1' : '0');
       }
       params.set('lat', viewState.latitude.toFixed(2));
       params.set('lon', viewState.longitude.toFixed(2));
@@ -92,5 +95,5 @@ export function useUrlState() {
         history.replaceState(null, '', `#${newHash}`);
       }
     }, 1000);
-  }, [mode, timeWindow, transportFilter, modes, viewState, selectedStationId, onlySelected]);
+  }, [mode, timeWindow, transportFilter, modes, viewState, selectedStationId, polygonStationId, onlySelected]);
 }

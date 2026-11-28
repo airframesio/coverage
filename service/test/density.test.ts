@@ -135,6 +135,13 @@ describe('GET /api/v1/coverage/stations/:id/density', () => {
     expect(cells).toEqual([{ h3: busy, msgCount: 6, stationCount: 2 }]);
   });
 
+  it('goes by the station\'s own transport type', async () => {
+    const marine = await (await app.request('/api/v1/coverage/stations/1/density?window=1h&transport=marine')).json();
+    expect(marine.cells).toEqual([]);
+    const aircraft = await (await app.request('/api/v1/coverage/stations/1/density?window=1h&transport=aircraft')).json();
+    expect(aircraft.totalMessages).toBe(22);
+  });
+
   it('rejects bad input', async () => {
     expect((await app.request('/api/v1/coverage/stations/x/density')).status).toBe(400);
     expect((await app.request('/api/v1/coverage/stations/1/density?window=nope')).status).toBe(400);

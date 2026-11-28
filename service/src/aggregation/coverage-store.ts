@@ -60,6 +60,9 @@ const OUT_OF_RANGE_BANDS_KM = [500, 750, 1000, 1500, 2000, 3000, 5000, 10000];
 
 const TRANSPORT_TYPES: TransportType[] = ['aircraft', 'marine', 'sonde', 'space'];
 
+/** Source types of AIS receivers (marine stations) */
+const MARINE_SOURCE_TYPES = new Set(['aiscatcher', 'ais']);
+
 export class CoverageStore {
   /** windows[resolutionIdx][windowIdx] = SlidingWindow */
   private windows: SlidingWindow[][] = [];
@@ -669,22 +672,28 @@ export class CoverageStore {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (ri === -1 || wi === -1 || !shouldMaintainResolution(resolution, wi)) return [];
 
-    const counts = new Map<string, { msgCount: number; stationCount: number }>();
+    // A cell holds one transport mask for all its stations, so the transport
+    // filter goes by the station's own kind (like the polygons route)
+    const station = this.stationMap.get(stationId);
+    if (transportType && station) {
+      const kind: TransportType = MARINE_SOURCE_TYPES.has(station.sourceType) ? 'marine' : 'aircraft';
+      if (kind !== transportType) return [];
+    }
+
+    const counts = new Map<string, { msgCount: number; stations: Set<number> }>();
     this.windows[ri][wi].forEachCell((h3, cell) => {
       const n = cellStationCount(cell, stationId);
       if (n === 0) return;
-      if (transportType && !cellHasTransport(cell, transportType)) return;
-      const stationsHere = typeof cell.stationIds === 'number' ? 1 : cell.stationIds.size;
-      const entry = counts.get(h3);
-      if (entry) {
-        entry.msgCount += n;
-        if (stationsHere > entry.stationCount) entry.stationCount = stationsHere;
-      } else {
-        counts.set(h3, { msgCount: n, stationCount: stationsHere });
+      let entry = counts.get(h3);
+      if (!entry) {
+        entry = { msgCount: 0, stations: new Set() };
+        counts.set(h3, entry);
       }
+      entry.msgCount += n;
+      // Distinct stations across the slices, not the most in any one slice
+      for (const id of cellStationIds(cell)) entry.stations.add(id);
     }, WINDOW_CONFIGS[wi].viewSlices);
 
-    const station = this.stationMap.get(stationId);
     if (station && !(station.latitude === 0 && station.longitude === 0)) {
       const coverage = this.getStationCoverage(stationId, windowName, transportType);
       const withoutPosition = coverage ? coverage.totalMessages - coverage.messagesWithPosition : 0;
@@ -696,7 +705,7 @@ export class CoverageStore {
       }
     }
 
-    return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stationCount }));
+    return Array.from(counts, ([h3, e]) => ({ h3, msgCount: e.msgCount, stationCount: e.stations.size }));
   }
 
   /** Cells of one resolution merged across a window's slices */

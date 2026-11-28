@@ -27,7 +27,10 @@ function DensityLegend({ hasStation }: { hasStation: boolean }) {
   const setDensityStyle = useUIStore((s) => s.setDensityStyle);
   const timeWindow = useUIStore((s) => s.timeWindow);
 
-  const data = densityData && densityData.window === timeWindow ? densityData : null;
+  const focusStationId = useUIStore((s) => s.selectedStationId ?? s.polygonStationId);
+  const data = densityData && densityData.window === timeWindow && densityData.stationId === focusStationId
+    ? densityData
+    : null;
   const max = data?.maxCount ?? 0;
   const width = data ? H3_CELL_WIDTH_KM[data.resolution] : undefined;
   const bandStops = Array.from({ length: DENSITY_BANDS }, (_, i) => {
