@@ -24,6 +24,11 @@ export interface CellAggregation {
    * station's message count in it (for the per-station density view)
    */
   stationIds: number | Map<number, number>;
+  /**
+   * Messages without a position, by station. They are filed in the station's
+   * own cell, so only those cells have this; density leaves them out.
+   */
+  positionless?: Map<number, number>;
   /** Bitmask of transport types */
   transportTypes: number;
 }
@@ -44,6 +49,11 @@ export interface CellResponse {
    * stationIds, when more than one station reported it
    */
   stationMsgCounts?: number[];
+  /**
+   * Snapshots only: each station's messages without a position in the cell,
+   * in the order of stationIds, when the cell has any
+   */
+  stationPositionless?: number[];
   transportTypes: string[];
 }
 

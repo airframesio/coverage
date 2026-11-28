@@ -187,6 +187,7 @@ export function mergeIntoCell(
   sourceType: string,
   stationId: number,
   transportType: TransportType,
+  hasPosition = true,
 ): void {
   cell.messageCount++;
   cell.totalDistance += distance;
@@ -197,7 +198,21 @@ export function mergeIntoCell(
 
   addCellSource(cell, sourceType);
   addCellStation(cell, stationId);
+  if (!hasPosition) addCellPositionless(cell, stationId);
   addCellTransport(cell, transportType);
+}
+
+/** Count one of a station's messages without a position in a cell */
+export function addCellPositionless(cell: CellAggregation, stationId: number, count = 1): void {
+  if (!cell.positionless) cell.positionless = new Map();
+  cell.positionless.set(stationId, (cell.positionless.get(stationId) ?? 0) + count);
+}
+
+/** A station's messages in a cell that came with a position */
+export function cellStationPositioned(cell: CellAggregation, stationId: number): number {
+  const n = cellStationCount(cell, stationId);
+  if (n === 0 || !cell.positionless) return n;
+  return Math.max(0, n - (cell.positionless.get(stationId) ?? 0));
 }
 
 /** A single time slice within a sliding window */
@@ -214,6 +229,11 @@ export class SlidingWindow {
   private currentIndex: number;
   /** When each slice started taking data */
   private sliceStarts: number[];
+  /**
+   * Slices restored from snapshots saved before positionless messages were
+   * counted per cell: their own-station cells mix both kinds
+   */
+  private positionlessUnknown = new WeakSet<Slice>();
   private timer: ReturnType<typeof setInterval>;
 
   constructor(config: WindowConfig) {
@@ -239,6 +259,7 @@ export class SlidingWindow {
   private rotate(): void {
     this.currentIndex = (this.currentIndex + 1) % this.config.slices;
     this.slices[this.currentIndex].clear();
+    this.positionlessUnknown.delete(this.slices[this.currentIndex]);
     this.sliceStarts[this.currentIndex] = Date.now();
   }
 
@@ -315,13 +336,21 @@ export class SlidingWindow {
    * without merging them. Cheaper than getAggregated when only a few cells
    * matter (one station's density).
    */
-  forEachCell(fn: (h3: string, cell: CellAggregation) => void, newestSlices?: number): void {
+  forEachCell(
+    fn: (h3: string, cell: CellAggregation, positionlessUnknown: boolean) => void, newestSlices?: number,
+  ): void {
     const total = this.config.slices;
     const count = Math.min(newestSlices ?? total, total);
     for (let n = 0; n < count; n++) {
       const slice = this.slices[(this.currentIndex - n + total) % total];
-      for (const [h3, cell] of slice) fn(h3, cell);
+      const unknown = this.positionlessUnknown.has(slice);
+      for (const [h3, cell] of slice) fn(h3, cell, unknown);
     }
+  }
+
+  /** Mark a slice as restored without positionless counts (see positionlessUnknown) */
+  markPositionlessUnknown(slice: Slice): void {
+    this.positionlessUnknown.add(slice);
   }
 
   /** Total message count across all slices */
