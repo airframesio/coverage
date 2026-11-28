@@ -208,6 +208,47 @@ export function addCellPositionless(cell: CellAggregation, stationId: number, co
   cell.positionless.set(stationId, (cell.positionless.get(stationId) ?? 0) + count);
 }
 
+/**
+ * File a cell's messages from stations in `renames` under the station each one
+ * was merged into. Returns whether the cell changed.
+ */
+export function renameCellStations(cell: CellAggregation, renames: ReadonlyMap<number, number>): boolean {
+  let changed = false;
+  const ids = cell.stationIds;
+  if (typeof ids === 'number') {
+    const to = renames.get(ids);
+    if (to !== undefined) {
+      cell.stationIds = to;
+      changed = true;
+    }
+  } else {
+    let moved: [number, number][] | null = null;
+    for (const [sid, n] of ids) {
+      const to = renames.get(sid);
+      if (to !== undefined) (moved ??= []).push([to, n]);
+    }
+    if (moved) {
+      for (const sid of ids.keys()) if (renames.has(sid)) ids.delete(sid);
+      for (const [to, n] of moved) ids.set(to, (ids.get(to) ?? 0) + n);
+      if (ids.size === 1) cell.stationIds = ids.keys().next().value!;
+      changed = true;
+    }
+  }
+  if (cell.positionless) {
+    let moved: [number, number][] | null = null;
+    for (const [sid, n] of cell.positionless) {
+      const to = renames.get(sid);
+      if (to !== undefined) (moved ??= []).push([to, n]);
+    }
+    if (moved) {
+      for (const [from] of [...cell.positionless].filter(([sid]) => renames.has(sid))) cell.positionless.delete(from);
+      for (const [to, n] of moved) cell.positionless.set(to, (cell.positionless.get(to) ?? 0) + n);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /** A station's messages in a cell that came with a position */
 export function cellStationPositioned(cell: CellAggregation, stationId: number): number {
   const n = cellStationCount(cell, stationId);
@@ -346,6 +387,15 @@ export class SlidingWindow {
       const unknown = this.positionlessUnknown.has(slice);
       for (const [h3, cell] of slice) fn(h3, cell, unknown);
     }
+  }
+
+  /** File every slice's cells of the stations in `renames` under their new ids */
+  renameStations(renames: ReadonlyMap<number, number>): number {
+    let changed = 0;
+    for (const slice of this.slices) {
+      for (const cell of slice.values()) if (renameCellStations(cell, renames)) changed++;
+    }
+    return changed;
   }
 
   /** Mark a slice as restored without positionless counts (see positionlessUnknown) */

@@ -8,14 +8,23 @@ import { jobStatus } from '../metrics/job-status.js';
  * Optionally enriches stations with coordinates from a production API
  * (for local dev where GeoIP data is missing due to relayed/private IPs).
  */
+/** A station retired into another (main API `GET /stations/merges`). */
+export interface StationMerge {
+  sourceId: number;
+  targetId: number;
+}
+
 export class StationSync {
   private timer: ReturnType<typeof setInterval> | null = null;
   private stationMap: Map<number, StationMeta>;
   /** Production stations indexed by ident for coordinate enrichment */
   private enrichMap: Map<string, { latitude: number; longitude: number }> | null = null;
 
-  constructor(stationMap: Map<number, StationMeta>) {
+  private onMerges?: (merges: StationMerge[]) => void;
+
+  constructor(stationMap: Map<number, StationMeta>, onMerges?: (merges: StationMerge[]) => void) {
     this.stationMap = stationMap;
+    this.onMerges = onMerges;
   }
 
   async start(): Promise<void> {
@@ -143,6 +152,38 @@ export class StationSync {
       );
     } catch (err) {
       console.error('[StationSync] Sync failed:', err instanceof Error ? err.message : err);
+    }
+    if (this.onMerges) await this.syncMerges();
+  }
+
+  /**
+   * Stations retired into another one. Deleted stations are left out of
+   * /stations, so their coverage is folded into the station they became.
+   * An API without the route (404) just means no merges.
+   */
+  private async syncMerges(): Promise<void> {
+    try {
+      const response = await fetch(`${config.mainApiUrl}/stations/merges`);
+      if (!response.ok) {
+        if (response.status !== 404) {
+          console.error(`[StationSync] Failed to fetch station merges: ${response.status}`);
+        }
+        return;
+      }
+      const contentType = response.headers.get('content-type') ?? '';
+      if (!contentType.includes('application/json')) return;
+      const rows = await response.json() as any[];
+      if (!Array.isArray(rows)) return;
+      const merges: StationMerge[] = [];
+      for (const r of rows) {
+        const sourceId = toStationId(r?.sourceId);
+        const targetId = toStationId(r?.targetId);
+        if (sourceId === null || targetId === null || sourceId === targetId) continue;
+        merges.push({ sourceId, targetId });
+      }
+      this.onMerges?.(merges);
+    } catch (err) {
+      console.error('[StationSync] Merge sync failed:', err instanceof Error ? err.message : err);
     }
   }
 

@@ -103,6 +103,16 @@ Airframes coverage aggregation service. Subscribes to NATS processed messages ac
   counts what is written. The old `h3`/`stations` rows are read once after an
   upgrade and deleted at the first per-slice save.
 - Station metadata synced from main API (authoritative coordinates)
+- Station merges (Tower "Merge stations"): after each station sync the service
+  reads `GET /stations/merges` on the main API (`{sourceId, targetId}`; a 404
+  means none) and `setStationMerges` files the retired station's cells, counts
+  and range under the station it became, in every window and slice, with chains
+  followed to the end. Retired stations are deleted and missing from
+  `/stations`, so without this their history stays under an id nobody can open.
+  Snapshots still name the old ids (closed slices are not written again), so
+  `loadH3Snapshot`, `loadStationSlice` and old station snapshots map them as
+  they load; the first station sync runs before snapshots load. Events still
+  sent under an old id count for the new station.
 
 ## Key Directories
 - src/nats/ - NATS subscription and message parsers

@@ -379,6 +379,39 @@ export class StationSlidingWindow {
   }
 
   /**
+   * Add the totals of stations in `renames` to the station each one was merged
+   * into, slice by slice, and drop the old entries. Returns entries moved.
+   */
+  renameStations(renames: ReadonlyMap<number, number>): number {
+    let moved = 0;
+    for (const slice of this.slices) {
+      for (const [key, data] of [...slice]) {
+        const to = renames.get(parseInt(key, 10));
+        if (to === undefined) continue;
+        slice.delete(key);
+        const targetKey = sliceKey(to, data.transportType);
+        const target = slice.get(targetKey);
+        if (!target) {
+          slice.set(targetKey, data);
+        } else {
+          target.totalMessages += data.totalMessages;
+          target.messagesWithPosition += data.messagesWithPosition;
+          target.totalLevelSum += data.totalLevelSum;
+          target.levelCount += data.levelCount;
+          target.errorCount += data.errorCount;
+          for (let i = 0; i < 36; i++) {
+            if (data.sectorMaxDist[i] > target.sectorMaxDist[i]) target.sectorMaxDist[i] = data.sectorMaxDist[i];
+            target.sectorMsgCount[i] += data.sectorMsgCount[i];
+            target.sectorLevelSum[i] += data.sectorLevelSum[i];
+          }
+        }
+        moved++;
+      }
+    }
+    return moved;
+  }
+
+  /**
    * Forget a station's range and direction, keeping its message counts. Used
    * when the station turns out to be somewhere else: distances and bearings
    * measured from the old spot mean nothing.

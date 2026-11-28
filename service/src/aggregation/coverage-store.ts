@@ -1,6 +1,6 @@
 import {
   SlidingWindow, createEmptyCell, mergeIntoCell, cellSources, cellHasFamily, cellStationIds, cellTransportTypes,
-  cellHasTransport, addCellSource, setCellStations, addCellTransport, cellStationCount, cellStationPositioned, addCellPositionless,
+  cellHasTransport, addCellSource, setCellStations, addCellTransport, cellStationCount, cellStationPositioned, addCellPositionless, renameCellStations,
 } from './sliding-window.js';
 import { StationSlidingWindow, type SavedStationSliceEntry } from './station-window.js';
 import { cellArea, latLngToCell } from 'h3-js';
@@ -109,6 +109,11 @@ export class CoverageStore {
   public stationsRelocated = 0;
   /** See stationSectorsRevision() */
   private sectorsRevision = 0;
+  /**
+   * Retired station id -> the station it was merged into (main API
+   * /stations/merges), chains already followed to the end
+   */
+  private mergedInto = new Map<number, number>();
 
   constructor() {
     // Initialize sliding windows for each resolution x window combination
@@ -135,6 +140,10 @@ export class CoverageStore {
    * This is the hot path — called for every NATS message.
    */
   ingest(event: CoverageEvent): void {
+    // A merged station's id counts as the station it was merged into
+    const mergedTo = this.mergedInto.get(event.stationId);
+    if (mergedTo !== undefined) event.stationId = mergedTo;
+
     // 1. Station trust check (uses synced metadata, not NATS payload)
     const trust = checkStationTrust(event, this.stationMap);
     if (!trust.trusted) {
@@ -551,6 +560,60 @@ export class CoverageStore {
   }
 
   /**
+   * Take the main API's station merges. Stations newly found merged have
+   * their history, in every window and slice, filed under the station they
+   * were merged into (one walk for all of them); snapshots restored later are
+   * mapped as they load. Returns how many merges were new.
+   */
+  setStationMerges(merges: readonly { sourceId: number; targetId: number }[]): number {
+    const direct = new Map<number, number>();
+    for (const m of merges) {
+      if (Number.isSafeInteger(m.sourceId) && Number.isSafeInteger(m.targetId) && m.sourceId !== m.targetId) {
+        direct.set(m.sourceId, m.targetId);
+      }
+    }
+    // Follow chains (A into B, later B into C) to the end; a loop is ignored
+    const resolved = new Map<number, number>();
+    for (const source of direct.keys()) {
+      let target = direct.get(source)!;
+      const seen = new Set([source]);
+      while (direct.has(target) && !seen.has(target)) {
+        seen.add(target);
+        target = direct.get(target)!;
+      }
+      if (!seen.has(target)) resolved.set(source, target);
+    }
+
+    const renames = new Map<number, number>();
+    for (const [source, target] of resolved) {
+      if (this.mergedInto.get(source) !== target) renames.set(source, target);
+    }
+    // A merge already folded into a station that is now merged itself
+    for (const [source, target] of this.mergedInto) {
+      if (!resolved.has(source)) resolved.set(source, target);
+    }
+    this.mergedInto = resolved;
+    if (renames.size === 0) return 0;
+    // Older merges that pointed at a station merged now move along with it
+    for (const [source, target] of resolved) {
+      const next = renames.get(target);
+      if (next !== undefined) resolved.set(source, next);
+    }
+
+    for (const resWindows of this.windows) {
+      for (const window of new Set(resWindows)) window.renameStations(renames);
+    }
+    for (const window of this.stationWindows) window.renameStations(renames);
+    this.sectorsRevision++;
+    return renames.size;
+  }
+
+  /** The station a (possibly merged) station id counts as */
+  private mergedId(stationId: number): number {
+    return this.mergedInto.get(stationId) ?? stationId;
+  }
+
+  /**
    * Put one saved slice of station totals back at its age. Returns whether it
    * went into the current slice, or null when it is older than the window.
    */
@@ -559,7 +622,9 @@ export class CoverageStore {
   ): boolean | null {
     const wi = WINDOW_CONFIGS.findIndex(c => c.name === windowName);
     if (wi === -1 || !this.stationWindows[wi]) return null;
-    return this.stationWindows[wi].importSlice(startedAt, entries, now);
+    const mapped = this.mergedInto.size === 0 ? entries
+      : entries.map(e => (this.mergedInto.has(e.stationId) ? { ...e, stationId: this.mergedId(e.stationId) } : e));
+    return this.stationWindows[wi].importSlice(startedAt, mapped, now);
   }
 
   /**
@@ -815,6 +880,8 @@ export class CoverageStore {
           if (Number.isInteger(id) && id !== 0 && n > 0) addCellPositionless(newCell, id, n);
         });
       }
+      // Snapshots saved before a merge name the old station ids
+      if (this.mergedInto.size > 0) renameCellStations(newCell, this.mergedInto);
       for (const tt of cell.transportTypes) addCellTransport(newCell, tt as TransportType);
       slice.set(cell.h3, newCell);
     }
@@ -867,6 +934,7 @@ export class CoverageStore {
   }
 
   private restoreStationEntry(wi: number, s: any): void {
+    if (this.mergedInto.has(s.stationId)) s = { ...s, stationId: this.mergedId(s.stationId) };
     let tt: TransportType;
     if (TRANSPORT_TYPES.includes(s.transportType)) {
       tt = s.transportType;
